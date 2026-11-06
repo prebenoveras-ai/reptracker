@@ -2,7 +2,7 @@
 // Uses the Adafruit Bluefruit library bundled with Seeed's nRF52 board package.
 // Knows nothing about the IMU: the sketch hands it six int16 values per sample.
 //
-// GATT layout (UUIDs also in web/index.html):
+// GATT layout (UUIDs also in docs/index.html):
 //   Service  a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e
 //   Samples  a6e10002-...  notify  packet = [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
 //   Info     a6e10003-...  read    [u16 rateHz][u16 accelPerG][u16 gyroPerDps]

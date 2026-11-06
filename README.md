@@ -48,7 +48,13 @@ In `imu_serial`, type `v` + Enter for the slow readable view, or `c` + Enter for
 - `firmware/imu_serial`: Stage 2, prints IMU samples over USB serial
 - `firmware/libraries/RepBle`: reusable BLE streaming module (batched notifications)
 - `firmware/imu_ble`: Stage 3, streams IMU samples over BLE as "RepTracker"
-- `web/index.html`: Stage 3, Web Bluetooth page with live graphs (`?demo` shows fake data)
+- `docs/index.html`: Stage 3, Web Bluetooth page with live graphs (`?demo` shows fake data)
+
+## Phone page
+
+Hosted on GitHub Pages from `docs/`: https://prebenoveras-ai.github.io/reptracker/
+
+Open it in **Chrome** on Android. Samsung Internet doesn't support Web Bluetooth. Add `?demo` to the address to see fake data without the board.
 
 ## BLE protocol
 
