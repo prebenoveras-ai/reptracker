@@ -56,6 +56,12 @@ Hosted on GitHub Pages from `docs/`: https://prebenoveras-ai.github.io/reptracke
 
 Open it in **Chrome** on Android. Samsung Internet doesn't support Web Bluetooth. Add `?demo` to the address to see fake data without the board.
 
+### Recording sets (Stage 4)
+
+Type the exercise, pick where the board is worn and tap **Record**. A 3 s countdown with vibration is optional. Tap **Stop** when the set is done. The rep count can be typed before, during or after a set, including later in the saved list. Sets are kept in the phone browser's IndexedDB, so they survive a reload. Each set has its own **CSV** button, and **Download all** / **Share all** export everything as one file.
+
+CSV columns: `set_id, exercise, placement, reps, sample, t_s, ax_g, ay_g, az_g, gx_dps, gy_dps, gz_dps`. `sample` counts from 0 at 104 Hz, and a jump in it means samples were lost over Bluetooth.
+
 ## BLE protocol
 
 | What | UUID | Format |

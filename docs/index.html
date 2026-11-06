@@ -8,7 +8,7 @@
 <style>
   :root {
     --bg: #0f1115; --card: #181b22; --line: #262a33; --text: #e8eaef; --muted: #8b92a1;
-    --x: #ff6b6b; --y: #4cd18a; --z: #5aa8ff; --accent: #8b7cff;
+    --x: #ff6b6b; --y: #4cd18a; --z: #5aa8ff; --accent: #8b7cff; --rec: #ff4d5e;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -19,19 +19,38 @@
   button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px;
     background: var(--accent); color: #fff; cursor: pointer; }
   button.secondary { background: var(--line); color: var(--text); }
-  button:disabled { opacity: .5; }
+  button.small { padding: 6px 10px; font-size: 13px; }
+  button.rec { background: var(--rec); }
+  button:disabled { opacity: .45; cursor: default; }
+  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 10px; width: 100%; min-width: 0; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   .status { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 12px; }
   .status b { color: var(--text); font-weight: 600; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
   .dot.on { background: var(--y); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
-  .card h2 { font-size: 14px; margin: 0 0 6px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
   .vals { font: 13px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
-  .vals span { display: inline-block; min-width: 70px; text-align: right; }
+  .vals span { display: inline-block; min-width: 64px; text-align: right; }
   .x { color: var(--x); } .y { color: var(--y); } .z { color: var(--z); }
-  canvas { width: 100%; height: 180px; display: block; }
-  .msg { color: var(--muted); font-size: 13px; }
+  canvas { width: 100%; height: 170px; display: block; }
+  .msg { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .msg:empty { display: none; }
   .err { color: var(--x); }
+  .grid { display: grid; grid-template-columns: 2fr 1.2fr 0.8fr; gap: 8px; margin-bottom: 10px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .recinfo { font: 600 15px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
+  .recinfo.live { color: var(--rec); }
+  .sets { list-style: none; margin: 0; padding: 0; }
+  .sets li { border-top: 1px solid var(--line); padding: 10px 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
+  .sets li:first-child { border-top: 0; }
+  .sets .name { font-weight: 600; }
+  .sets .meta { color: var(--muted); font-size: 12px; }
+  .sets .acts { display: flex; gap: 6px; align-items: center; }
+  .sets input { width: 64px; padding: 6px 8px; font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  @media (max-width: 420px) { .grid { grid-template-columns: 1fr 1fr; } .grid .wide { grid-column: 1 / -1; } }
 </style>
 </head>
 <body>
@@ -49,6 +68,26 @@
   <p id="msg" class="msg"></p>
 
   <section class="card">
+    <h2>Record a set</h2>
+    <div class="grid">
+      <div class="wide"><label for="exercise">Exercise</label>
+        <input id="exercise" list="exlist" placeholder="e.g. bicep curl" autocomplete="off"></div>
+      <div><label for="placement">Board on</label>
+        <select id="placement"><option>wrist</option><option>bar</option><option>dumbbell</option><option>other</option></select></div>
+      <div><label for="reps">Reps done</label>
+        <input id="reps" type="number" inputmode="numeric" min="0" placeholder="-"></div>
+    </div>
+    <datalist id="exlist"></datalist>
+    <div class="row">
+      <button id="record" class="rec" disabled>Record</button>
+      <button id="stop" class="secondary" hidden>Stop</button>
+      <label class="row" style="margin:0;font-size:13px;color:var(--muted)">
+        <input id="countdown" type="checkbox" checked style="width:auto"> 3 s countdown</label>
+      <span id="recinfo" class="recinfo"></span>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Acceleration (g)
       <span class="vals"><span class="x" id="ax">-</span><span class="y" id="ay">-</span><span class="z" id="az">-</span></span></h2>
     <canvas id="accel"></canvas>
@@ -58,7 +97,15 @@
       <span class="vals"><span class="x" id="gx">-</span><span class="y" id="gy">-</span><span class="z" id="gz">-</span></span></h2>
     <canvas id="gyro"></canvas>
   </section>
-  <p class="msg"><span class="x">X</span> along the board (toward USB) &middot; <span class="y">Y</span> across it &middot; <span class="z">Z</span> out of the chip side. Last 5 seconds.</p>
+
+  <section class="card">
+    <h2>Saved sets <span class="row">
+      <button id="shareAll" class="small secondary" hidden>Share all</button>
+      <button id="downloadAll" class="small secondary">Download all</button></span></h2>
+    <ul id="sets" class="sets"></ul>
+  </section>
+
+  <p class="msg"><span class="x">X</span> along the board (toward USB) &middot; <span class="y">Y</span> across it &middot; <span class="z">Z</span> out of the chip side. Graphs show the last 5 seconds.</p>
 </main>
 
 <script>
@@ -71,44 +118,56 @@ const INFO = 'a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 const WINDOW_S = 5;
 let rateHz = 104, accelPerG = 1000, gyroPerDps = 10;
 let cap = rateHz * WINDOW_S;
-let buf = [];             // recent samples: [ax,ay,az,gx,gy,gz]
+let buf = [];             // recent samples for the graph: [ax,ay,az,gx,gy,gz] in g and deg/s
 let nextIdx = null, missing = 0, recvCount = 0, rateT0 = performance.now();
 let device = null, wakeLock = null;
+let rec = null;           // active recording
+let countdownTimer = null;
 
 const $ = id => document.getElementById(id);
 const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'msg err' : 'msg'; };
+const isLive = () => demo || !!(device && device.gatt && device.gatt.connected);
 
 function setState(connected, label) {
   $('state').textContent = label;
   $('dot').className = connected ? 'dot on' : 'dot';
   $('connect').hidden = connected;
   $('disconnect').hidden = !connected;
+  $('record').disabled = !connected || !!rec || !!countdownTimer;
 }
 
+// ---- incoming data ----
 // Packet: [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
 function onPacket(ev) {
   const dv = ev.target.value;
   const idx = dv.getUint32(0, true), n = dv.getUint8(4);
-  if (nextIdx !== null && idx > nextIdx) missing += idx - nextIdx;
-  nextIdx = idx + n;
   for (let i = 0; i < n; i++) {
-    const o = 5 + i * 12;
-    pushSample([
-      dv.getInt16(o, true) / accelPerG, dv.getInt16(o + 2, true) / accelPerG, dv.getInt16(o + 4, true) / accelPerG,
-      dv.getInt16(o + 6, true) / gyroPerDps, dv.getInt16(o + 8, true) / gyroPerDps, dv.getInt16(o + 10, true) / gyroPerDps,
-    ]);
+    const o = 5 + i * 12, raw = new Array(6);
+    for (let k = 0; k < 6; k++) raw[k] = dv.getInt16(o + k * 2, true);
+    ingest(idx + i, raw);
   }
 }
 
-function pushSample(s) {
+// One sample: index from the board plus six raw integers.
+function ingest(idx, raw) {
+  if (nextIdx !== null && idx > nextIdx) missing += idx - nextIdx;
+  nextIdx = idx + 1;
+  const s = [raw[0] / accelPerG, raw[1] / accelPerG, raw[2] / accelPerG,
+             raw[3] / gyroPerDps, raw[4] / gyroPerDps, raw[5] / gyroPerDps];
   buf.push(s);
   if (buf.length > cap) buf.splice(0, buf.length - cap);
   recvCount++;
+  if (rec) {
+    if (rec.startIdx === null) rec.startIdx = idx;
+    rec.idx.push(idx - rec.startIdx);
+    for (let k = 0; k < 6; k++) rec.raw.push(raw[k]);
+  }
 }
 
+// ---- connection ----
 async function connect() {
   if (!navigator.bluetooth) {
-    setMsg('Web Bluetooth is not available. Use Chrome on Android or desktop, over https.', true);
+    setMsg('Bluetooth is not available in this browser. Use Chrome (Samsung Internet does not support it).', true);
     return;
   }
   try {
@@ -134,17 +193,208 @@ async function connect() {
 }
 
 function onDisconnected() {
+  cancelCountdown();
+  const wasRecording = !!rec;
+  if (rec) stopRecording(true);
+  else resetRecUi();
   setState(false, 'Disconnected');
-  setMsg('Lost connection. Tap Connect to reconnect.');
+  if (!wasRecording) setMsg('Lost connection. Tap Connect to reconnect.');
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 }
 
 async function keepAwake() {
   try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
 }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isLive()) keepAwake(); });
 
 $('connect').onclick = connect;
 $('disconnect').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); };
+
+// ---- recording ----
+function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {} }
+
+$('record').onclick = () => {
+  const ex = $('exercise').value.trim();
+  if (!ex) { setMsg('Type the exercise name first.', true); $('exercise').focus(); return; }
+  setMsg('');
+  try { localStorage.setItem('rt_last', JSON.stringify({ ex, pl: $('placement').value })); } catch (_) {}
+  if (!$('countdown').checked) return startRecording();
+  let n = 3;
+  $('record').disabled = true;
+  $('stop').hidden = false;
+  $('recinfo').className = 'recinfo live';
+  $('recinfo').textContent = 'Starting in ' + n;
+  buzz(80);
+  countdownTimer = setInterval(() => {
+    n--;
+    if (n > 0) { $('recinfo').textContent = 'Starting in ' + n; buzz(80); return; }
+    cancelCountdown();
+    startRecording();
+  }, 1000);
+};
+
+function cancelCountdown() {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+}
+
+function startRecording() {
+  if (!isLive()) { resetRecUi(); return; }
+  rec = {
+    exercise: $('exercise').value.trim(), placement: $('placement').value,
+    reps: $('reps').value === '' ? null : Number($('reps').value),
+    startIdx: null, idx: [], raw: [], missingAtStart: missing,
+    rateHz, accelPerG, gyroPerDps,
+  };
+  buzz(250);
+  $('record').disabled = true;
+  $('stop').hidden = false;
+  $('recinfo').className = 'recinfo live';
+  $('recinfo').textContent = '● REC 0.0 s';
+}
+
+$('stop').onclick = () => {
+  if (countdownTimer) { cancelCountdown(); resetRecUi(); return; }
+  stopRecording(false);
+};
+
+function resetRecUi() {
+  $('stop').hidden = true;
+  $('recinfo').className = 'recinfo';
+  $('recinfo').textContent = '';
+  $('record').disabled = !isLive();
+}
+
+async function stopRecording(lostConnection) {
+  const r = rec; rec = null;
+  resetRecUi();
+  if (!r || r.idx.length < 10) { if (r) setMsg('Set was too short to save.'); return; }
+  buzz([80, 60, 80]);
+  // Reps typed during the set count too.
+  const repsNow = $('reps').value === '' ? r.reps : Number($('reps').value);
+  const set = {
+    id: Date.now(), exercise: r.exercise, placement: r.placement, reps: repsNow,
+    rateHz: r.rateHz, accelPerG: r.accelPerG, gyroPerDps: r.gyroPerDps,
+    samples: r.idx.length, missing: missing - r.missingAtStart,
+    duration: (r.idx[r.idx.length - 1] + 1) / r.rateHz,
+    idx: Uint32Array.from(r.idx), raw: Int16Array.from(r.raw),
+    lostConnection,
+  };
+  await dbPut(set);
+  setMsg(lostConnection ? 'Connection dropped, so the set was stopped and saved.'
+    : 'Saved ' + set.exercise + ' (' + set.duration.toFixed(1) + ' s).' + (repsNow === null ? ' Add the rep count below.' : ''), lostConnection);
+  $('reps').value = '';
+  renderSets();
+}
+
+// ---- storage (IndexedDB; sets survive reloads) ----
+let dbp = null;
+function db() {
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const q = indexedDB.open('reptracker', 1);
+    q.onupgradeneeded = () => q.result.createObjectStore('sets', { keyPath: 'id' });
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+  return dbp;
+}
+async function tx(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction('sets', mode), req = fn(t.objectStore('sets'));
+    t.oncomplete = () => res(req && req.result);
+    t.onerror = () => rej(t.error);
+  });
+}
+const dbPut = set => tx('readwrite', st => st.put(set)).catch(e => setMsg('Could not save the set: ' + e.message, true));
+const dbAll = () => tx('readonly', st => st.getAll()).catch(() => []);
+const dbDel = id => tx('readwrite', st => st.delete(id));
+const dbGet = id => tx('readonly', st => st.get(id));
+
+// ---- CSV ----
+const CSV_HEAD = 'set_id,exercise,placement,reps,sample,t_s,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n';
+function csvCell(v) { v = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function setRows(s) {
+  const pre = [s.id, csvCell(s.exercise), s.placement, s.reps === null ? '' : s.reps].join(',');
+  const lines = new Array(s.samples), r = s.raw;
+  for (let i = 0; i < s.samples; i++) {
+    const o = i * 6;
+    lines[i] = pre + ',' + s.idx[i] + ',' + (s.idx[i] / s.rateHz).toFixed(4) + ',' +
+      (r[o] / s.accelPerG).toFixed(3) + ',' + (r[o + 1] / s.accelPerG).toFixed(3) + ',' + (r[o + 2] / s.accelPerG).toFixed(3) + ',' +
+      (r[o + 3] / s.gyroPerDps).toFixed(1) + ',' + (r[o + 4] / s.gyroPerDps).toFixed(1) + ',' + (r[o + 5] / s.gyroPerDps).toFixed(1);
+  }
+  return lines.join('\n') + '\n';
+}
+function slug(t) { return (t || 'set').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'set'; }
+function stamp(id) { const d = new Date(id), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
+function setFileName(s) { return 'reptracker_' + stamp(s.id) + '_' + slug(s.exercise) + (s.reps !== null ? '_' + s.reps + 'reps' : '') + '.csv'; }
+
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function allCsv() {
+  const sets = (await dbAll()).sort((a, b) => a.id - b.id);
+  return { sets, text: CSV_HEAD + sets.map(setRows).join('') };
+}
+
+$('downloadAll').onclick = async () => {
+  const { sets, text } = await allCsv();
+  if (!sets.length) return setMsg('No sets recorded yet.');
+  download('reptracker_all_' + stamp(Date.now()) + '.csv', text);
+};
+
+const canShareFiles = (() => { try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.csv', { type: 'text/csv' })] })); } catch (_) { return false; } })();
+$('shareAll').hidden = !canShareFiles;
+$('shareAll').onclick = async () => {
+  const { sets, text } = await allCsv();
+  if (!sets.length) return setMsg('No sets recorded yet.');
+  const file = new File([text], 'reptracker_all_' + stamp(Date.now()) + '.csv', { type: 'text/csv' });
+  try { await navigator.share({ files: [file], title: 'RepTracker sets' }); }
+  catch (e) { if (e.name !== 'AbortError') setMsg('Share failed: ' + e.message, true); }
+};
+
+// ---- saved sets list ----
+async function renderSets() {
+  const sets = (await dbAll()).sort((a, b) => b.id - a.id);
+  const ul = $('sets');
+  ul.textContent = '';
+  if (!sets.length) {
+    const li = document.createElement('li'); li.className = 'empty';
+    li.textContent = 'No sets yet. Connect, type the exercise, then tap Record.'; ul.appendChild(li);
+  }
+  const names = new Set();
+  for (const s of sets) {
+    names.add(s.exercise);
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = s.exercise;
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.textContent = new Date(s.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + s.placement +
+      ' · ' + s.duration.toFixed(1) + ' s · ' + s.samples + ' samples' + (s.missing ? ' · ' + s.missing + ' missing' : '');
+    info.append(name, meta);
+    const acts = document.createElement('div'); acts.className = 'acts';
+    const reps = document.createElement('input');
+    reps.type = 'number'; reps.inputMode = 'numeric'; reps.min = '0'; reps.placeholder = 'reps';
+    reps.value = s.reps === null ? '' : s.reps; reps.title = 'Reps done';
+    reps.onchange = async () => {
+      const full = await dbGet(s.id); if (!full) return;
+      full.reps = reps.value === '' ? null : Number(reps.value); await dbPut(full);
+    };
+    const dl = document.createElement('button'); dl.className = 'small secondary'; dl.textContent = 'CSV';
+    dl.onclick = async () => { const full = await dbGet(s.id); if (full) download(setFileName(full), CSV_HEAD + setRows(full)); };
+    const del = document.createElement('button'); del.className = 'small secondary'; del.textContent = 'Delete';
+    del.onclick = async () => { if (confirm('Delete this ' + s.exercise + ' set?')) { await dbDel(s.id); renderSets(); } };
+    acts.append(reps, dl, del);
+    li.append(info, acts);
+    ul.appendChild(li);
+  }
+  const dlist = $('exlist'); dlist.textContent = '';
+  for (const n of names) { const o = document.createElement('option'); o.value = n; dlist.appendChild(o); }
+}
 
 // ---- drawing ----
 function sizeCanvas(c) {
@@ -188,9 +438,10 @@ function frame() {
   draw($('gyro'), 3, 50);
   const s = buf[buf.length - 1];
   if (s) ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((id, k) => $(id).textContent = s[k].toFixed(k < 3 ? 2 : 0));
+  if (rec) $('recinfo').textContent = '● REC ' + (rec.idx.length / rateHz).toFixed(1) + ' s';
   const now = performance.now();
   if (now - rateT0 >= 1000) {
-    $('rate').textContent = device && device.gatt && device.gatt.connected || demo ? Math.round(recvCount * 1000 / (now - rateT0)) + ' Hz' : '-';
+    $('rate').textContent = isLive() ? Math.round(recvCount * 1000 / (now - rateT0)) + ' Hz' : '-';
     recvCount = 0; rateT0 = now;
     $('missing').textContent = missing;
   }
@@ -205,10 +456,17 @@ if (demo) {
   setInterval(() => {
     for (let i = 0; i < 8; i++, t++) {
       const p = t / rateHz, rep = Math.sin(p * 2 * Math.PI / 2.5);
-      pushSample([0.05 * Math.sin(p * 7), 0.3 * rep, 1 + 0.4 * rep * rep, 120 * Math.cos(p * 2 * Math.PI / 2.5), 8 * Math.sin(p * 3), -3]);
+      ingest(t, [Math.round(50 * Math.sin(p * 7)), Math.round(300 * rep), Math.round(1000 + 400 * rep * rep),
+                 Math.round(1200 * Math.cos(p * 2 * Math.PI / 2.5)), Math.round(80 * Math.sin(p * 3)), -30]);
     }
   }, 8000 / rateHz);
 }
+
+try {
+  const last = JSON.parse(localStorage.getItem('rt_last') || 'null');
+  if (last) { $('exercise').value = last.ex || ''; $('placement').value = last.pl || 'wrist'; }
+} catch (_) {}
+renderSets();
 requestAnimationFrame(frame);
 </script>
 </body>
