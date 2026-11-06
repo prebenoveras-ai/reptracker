@@ -1,0 +1,5 @@
+build/
+*.zip
+*.hex
+*.uf2
+
