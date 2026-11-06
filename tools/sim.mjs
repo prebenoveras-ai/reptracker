@@ -213,8 +213,11 @@ function truthMetrics(sc, wrist) {
     const sgn = set.concentric === 'down' ? -1 : 1;
     for (const rep of set.reps) {
       const a = Math.round(rep.conStart * FH), b = Math.round(rep.conEnd * FH);
+      // same definition as the engine: mean over samples moving at >= 10% of peak speed
       let s = 0, c = 0, pk = 0;
-      for (let i = a; i < b; i++) { const v = sgn * (z[i + 1] - z[i]) * FH; if (v >= 0.03) { s += v; c++; } pk = Math.max(pk, v); }
+      for (let i = a; i < b; i++) pk = Math.max(pk, sgn * (z[i + 1] - z[i]) * FH);
+      const cut = Math.max(0.03, 0.1 * pk);
+      for (let i = a; i < b; i++) { const v = sgn * (z[i + 1] - z[i]) * FH; if (v >= cut) { s += v; c++; } }
       rep.mcv = c ? s / c : 0; rep.pv = pk;
       rep.rom = Math.abs(z[b] - z[a]);
     }

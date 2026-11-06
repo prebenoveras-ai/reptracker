@@ -426,10 +426,13 @@ export function analyzeWindow(F, a, b, opts) {
   const reps = keep.map((c, idx) => {
     // The lift itself: grow outwards from the fastest point until the bar stops. This drops pauses
     // and set-up moves that merged into the phase (unracking then pressing is one long "up").
+    // Mean concentric velocity is measured where the bar moves at >= 10% of this rep's peak speed,
+    // so slow tails and leftover drift at the turnarounds don't dilute it.
     let pk = c.i0; for (let i = c.i0; i <= c.i1; i++) if (v[i] * sgn > v[pk] * sgn) pk = i;
+    const vcut = Math.max(vmin, 0.1 * v[pk] * sgn);
     let s = pk, e = pk;
-    while (s > c.i0 && v[s - 1] * sgn >= vmin) s--;
-    while (e < c.i1 && v[e + 1] * sgn >= vmin) e++;
+    while (s > c.i0 && v[s - 1] * sgn >= vcut) s--;
+    while (e < c.i1 && v[e + 1] * sgn >= vcut) e++;
     const romMove = (p[e] - p[s]) * sgn;
     let sumV = 0, peakV = 0, peakI = s, sumP = 0, peakP = 0, peakA = 0;
     for (let i = s; i <= e; i++) {

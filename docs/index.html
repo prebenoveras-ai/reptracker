@@ -8,14 +8,16 @@
 <style>
   :root {
     --bg: #0f1115; --card: #181b22; --line: #262a33; --text: #e8eaef; --muted: #8b92a1;
-    --x: #ff6b6b; --y: #4cd18a; --z: #5aa8ff; --accent: #8b7cff; --rec: #ff4d5e;
+    --x: #ff6b6b; --y: #4cd18a; --z: #5aa8ff; --accent: #8b7cff; --rec: #ff4d5e; --warn: #ffb547;
+    --z1: #5aa8ff; --z2: #4cd18a; --z3: #ffd84a; --z4: #ff9a4a; --z5: #ff5a7a;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 900px; margin: 0 auto; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
-  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  main { max-width: 900px; margin: 0 auto; padding: 12px 16px; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
   h1 { font-size: 20px; margin: 0; flex: 1; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
   button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px;
     background: var(--accent); color: #fff; cursor: pointer; }
   button.secondary { background: var(--line); color: var(--text); }
@@ -25,32 +27,76 @@
   input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
     border-radius: 10px; padding: 9px 10px; width: 100%; min-width: 0; }
   label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .status { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .status { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
   .status b { color: var(--text); font-weight: 600; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
   .dot.on { background: var(--y); }
+  nav { display: flex; gap: 4px; margin: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+  nav button { background: transparent; color: var(--muted); padding: 8px 12px; border-radius: 999px; white-space: nowrap; }
+  nav button.on { background: var(--line); color: var(--text); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
   .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
   .vals { font: 13px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
-  .vals span { display: inline-block; min-width: 64px; text-align: right; }
+  .vals span { display: inline-block; min-width: 60px; text-align: right; }
   .x { color: var(--x); } .y { color: var(--y); } .z { color: var(--z); }
-  canvas { width: 100%; height: 170px; display: block; }
+  canvas { width: 100%; display: block; }
   .msg { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
   .msg:empty { display: none; }
   .err { color: var(--x); }
-  .grid { display: grid; grid-template-columns: 2fr 1.2fr 0.8fr; gap: 8px; margin-bottom: 10px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  [hidden] { display: none !important; }
+
+  /* live set panel */
+  .live { display: grid; grid-template-columns: auto 1fr; gap: 4px 18px; align-items: center; }
+  .bigrep { font: 800 88px/0.95 system-ui, sans-serif; font-variant-numeric: tabular-nums; min-width: 1.2ch; text-align: center; grid-row: span 3; }
+  .state { font-size: 13px; color: var(--muted); }
+  .vel { font: 700 34px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .vel small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+  .zone { font-size: 13px; font-weight: 600; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--bg); border-radius: 10px; padding: 8px; }
+  .stat b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  .vlbar { height: 8px; background: var(--bg); border-radius: 99px; position: relative; margin-top: 10px; overflow: hidden; }
+  .vlbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--y); border-radius: 99px; transition: width .25s, background .25s; }
+  .vlbar b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: .6; }
+  .alert { background: var(--rec); color: #fff; border-radius: 10px; padding: 8px 12px; font-weight: 700; margin-top: 10px; text-align: center; }
+  .rest { font: 700 40px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+
+  /* lists */
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list > li { border-top: 1px solid var(--line); padding: 10px 0; }
+  .list > li:first-child { border-top: 0; }
+  .sethead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .sethead .name { font-weight: 700; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { background: var(--bg); border-radius: 8px; padding: 3px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .chip b { font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 6px; }
+  th, td { text-align: right; padding: 4px 6px; border-top: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .sets li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
+  .sets .acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .sets input { width: 60px; padding: 6px 8px; font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; }
   .recinfo { font: 600 15px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
   .recinfo.live { color: var(--rec); }
-  .sets { list-style: none; margin: 0; padding: 0; }
-  .sets li { border-top: 1px solid var(--line); padding: 10px 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
-  .sets li:first-child { border-top: 0; }
-  .sets .name { font-weight: 600; }
-  .sets .meta { color: var(--muted); font-size: 12px; }
-  .sets .acts { display: flex; gap: 6px; align-items: center; }
-  .sets input { width: 64px; padding: 6px 8px; font-size: 13px; }
-  .empty { color: var(--muted); font-size: 13px; }
-  @media (max-width: 420px) { .grid { grid-template-columns: 1fr 1fr; } .grid .wide { grid-column: 1 / -1; } }
+  .faces { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 10px 0; }
+  .faces span { height: 28px; border-radius: 8px; background: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); }
+  .faces span.done { background: var(--y); color: #0f1115; font-weight: 700; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); margin: 6px 0; }
+  .toggle input { width: auto; }
+  @media (max-width: 460px) {
+    .grid { grid-template-columns: 1fr 1fr; } .grid .wide { grid-column: 1 / -1; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .bigrep { font-size: 72px; }
+  }
 </style>
 </head>
 <body>
@@ -64,79 +110,608 @@
     <div><span id="dot" class="dot"></span><b id="state">Not connected</b></div>
     <div>Rate <b id="rate">-</b></div>
     <div>Missing <b id="missing">0</b></div>
+    <div>Calibrated <b id="calState">no</b></div>
   </div>
   <p id="msg" class="msg"></p>
 
-  <section class="card">
-    <h2>Record a set</h2>
-    <div class="grid">
-      <div class="wide"><label for="exercise">Exercise</label>
-        <input id="exercise" list="exlist" placeholder="e.g. bicep curl" autocomplete="off"></div>
-      <div><label for="placement">Board on</label>
-        <select id="placement"><option>wrist</option><option>bar</option><option>dumbbell</option><option>other</option></select></div>
-      <div><label for="reps">Reps done</label>
-        <input id="reps" type="number" inputmode="numeric" min="0" placeholder="-"></div>
+  <nav id="tabs">
+    <button data-tab="workout" class="on">Workout</button>
+    <button data-tab="live">Live</button>
+    <button data-tab="record">Record</button>
+    <button data-tab="history">History</button>
+    <button data-tab="setup">Setup</button>
+  </nav>
+
+  <!-- ============ WORKOUT ============ -->
+  <section id="tab-workout">
+    <div class="card">
+      <div class="grid">
+        <div class="wide"><label for="wEx">Exercise</label>
+          <input id="wEx" list="exlist" placeholder="e.g. back squat" autocomplete="off"></div>
+        <div><label for="wLoad">Load (kg)</label>
+          <input id="wLoad" type="number" inputmode="decimal" min="0" step="0.5" placeholder="-"></div>
+        <div><label for="wPlace">Board on</label>
+          <select id="wPlace"><option value="bar">bar</option><option value="wrist">wrist</option><option value="dumbbell">dumbbell</option></select></div>
+      </div>
+      <p id="wProfile" class="hint"></p>
     </div>
-    <datalist id="exlist"></datalist>
-    <div class="row">
-      <button id="record" class="rec" disabled>Record</button>
-      <button id="stop" class="secondary" hidden>Stop</button>
-      <label class="row" style="margin:0;font-size:13px;color:var(--muted)">
-        <input id="countdown" type="checkbox" checked style="width:auto"> 3 s countdown</label>
-      <span id="recinfo" class="recinfo"></span>
+
+    <div class="card">
+      <div class="live">
+        <div class="bigrep" id="bigRep">0</div>
+        <div class="state" id="wState">Connect the board, then just start lifting. Sets are found automatically.</div>
+        <div class="vel" id="wVel">-<small>m/s</small></div>
+        <div class="zone" id="wZone">&nbsp;</div>
+      </div>
+      <div class="vlbar"><i id="vlFill" style="width:0"></i><b id="vlMark"></b></div>
+      <div class="row" style="margin-top:4px;font-size:12px;color:var(--muted)"><span>Velocity loss <b id="wVl" style="color:var(--text)">0%</b></span><span class="spacer"></span><span>stop at <b id="wVlLimit">20%</b></span></div>
+      <div id="wAlert" class="alert" hidden></div>
+      <canvas id="repBars" height="110" style="margin-top:10px"></canvas>
+      <div class="stats">
+        <div class="stat"><b id="sRom">-</b><span>range (cm)</span></div>
+        <div class="stat"><b id="sPeak">-</b><span>peak m/s</span></div>
+        <div class="stat"><b id="sTempo">-</b><span>down-pause-up (s)</span></div>
+        <div class="stat"><b id="sRir">-</b><span>reps in reserve</span></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="endSet" class="secondary" disabled>End set</button>
+        <span class="spacer"></span>
+        <div id="restBox" hidden><span class="meta">Rest</span> <span id="restTime" class="rest">0:00</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>This workout <span class="row">
+        <button id="finishWorkout" class="small" disabled>Finish &amp; save</button></span></h2>
+      <ul id="wSets" class="list"></ul>
+      <div id="wTotals" class="meta"></div>
     </div>
   </section>
 
-  <section class="card">
-    <h2>Acceleration (g)
-      <span class="vals"><span class="x" id="ax">-</span><span class="y" id="ay">-</span><span class="z" id="az">-</span></span></h2>
-    <canvas id="accel"></canvas>
-  </section>
-  <section class="card">
-    <h2>Rotation (deg/s)
-      <span class="vals"><span class="x" id="gx">-</span><span class="y" id="gy">-</span><span class="z" id="gz">-</span></span></h2>
-    <canvas id="gyro"></canvas>
+  <!-- ============ LIVE ============ -->
+  <section id="tab-live" hidden>
+    <div class="card">
+      <h2>Acceleration (g)
+        <span class="vals"><span class="x" id="ax">-</span><span class="y" id="ay">-</span><span class="z" id="az">-</span></span></h2>
+      <canvas id="accel" height="170"></canvas>
+    </div>
+    <div class="card">
+      <h2>Rotation (deg/s)
+        <span class="vals"><span class="x" id="gx">-</span><span class="y" id="gy">-</span><span class="z" id="gz">-</span></span></h2>
+      <canvas id="gyro" height="170"></canvas>
+    </div>
+    <div class="card">
+      <h2>Vertical speed (m/s) <span class="vals" id="vzNow">-</span></h2>
+      <canvas id="vzc" height="140"></canvas>
+      <p class="hint">Up is positive. Gravity removed using the board's orientation.</p>
+    </div>
+    <p class="msg"><span class="x">X</span> along the board (toward USB) &middot; <span class="y">Y</span> across it &middot; <span class="z">Z</span> out of the chip side. Last 5 seconds.</p>
   </section>
 
-  <section class="card">
-    <h2>Saved sets <span class="row">
-      <button id="shareAll" class="small secondary" hidden>Share all</button>
-      <button id="downloadAll" class="small secondary">Download all</button></span></h2>
-    <ul id="sets" class="sets"></ul>
+  <!-- ============ RECORD ============ -->
+  <section id="tab-record" hidden>
+    <div class="card">
+      <h2>Record a set (raw data)</h2>
+      <div class="grid">
+        <div class="wide"><label for="exercise">Exercise</label>
+          <input id="exercise" list="exlist" placeholder="e.g. bicep curl" autocomplete="off"></div>
+        <div><label for="placement">Board on</label>
+          <select id="placement"><option>wrist</option><option>bar</option><option>dumbbell</option><option>other</option></select></div>
+        <div><label for="reps">Reps done</label>
+          <input id="reps" type="number" inputmode="numeric" min="0" placeholder="-"></div>
+      </div>
+      <div class="row">
+        <button id="record" class="rec" disabled>Record</button>
+        <button id="stop" class="secondary" hidden>Stop</button>
+        <label class="row" style="margin:0;font-size:13px;color:var(--muted)">
+          <input id="countdown" type="checkbox" checked style="width:auto"> 3 s countdown</label>
+        <span id="recinfo" class="recinfo"></span>
+      </div>
+      <p class="hint">Workout mode also saves the raw data of every set it finds here automatically, labelled with the exercise.</p>
+    </div>
+    <div class="card">
+      <h2>Saved recordings <span class="row">
+        <button id="checkAll" class="small secondary">Check accuracy</button>
+        <button id="shareAll" class="small secondary" hidden>Share all</button>
+        <button id="downloadAll" class="small secondary">Download all</button></span></h2>
+      <div id="accuracy"></div>
+      <ul id="sets" class="list sets"></ul>
+    </div>
   </section>
 
-  <p class="msg"><span class="x">X</span> along the board (toward USB) &middot; <span class="y">Y</span> across it &middot; <span class="z">Z</span> out of the chip side. Graphs show the last 5 seconds.</p>
+  <!-- ============ HISTORY ============ -->
+  <section id="tab-history" hidden>
+    <div class="card">
+      <h2>Progress <select id="hEx" style="width:auto;max-width:60%"></select></h2>
+      <canvas id="hChart" height="200"></canvas>
+      <p class="hint" id="hHint"></p>
+      <div id="hProfile"></div>
+    </div>
+    <div class="card">
+      <h2>Workouts</h2>
+      <ul id="hList" class="list"></ul>
+    </div>
+  </section>
+
+  <!-- ============ SETUP ============ -->
+  <section id="tab-setup" hidden>
+    <div class="card">
+      <h2>Calibrate the board</h2>
+      <p class="hint" style="margin-top:0">Every sensor reads gravity slightly differently on each axis (yours read 1.04 g on one side and 1.00 g on another). One minute of calibration makes speed and range much more accurate, especially on the wrist.</p>
+      <ol class="hint">
+        <li>Connect the board.</li>
+        <li>Tap Start, then lay the board still on a table on each of its 6 sides in turn (chip up, chip down, and each of the 4 edges, leaning it against something).</li>
+        <li>Each side is captured automatically after about 2 s of stillness.</li>
+      </ol>
+      <div class="faces" id="faces"></div>
+      <div class="row"><button id="calStart" disabled>Start calibration</button>
+        <button id="calReset" class="secondary small">Forget calibration</button>
+        <span id="calInfo" class="meta"></span></div>
+    </div>
+    <div class="card">
+      <h2>Feedback</h2>
+      <label class="toggle"><input type="checkbox" id="optVoice" checked> Speak the rep count</label>
+      <label class="toggle"><input type="checkbox" id="optVoiceVel" checked> ...and the bar speed of each rep</label>
+      <label class="toggle"><input type="checkbox" id="optVibe" checked> Vibrate on every rep</label>
+      <div class="grid" style="margin-top:8px">
+        <div><label for="optVl">Stop the set at velocity loss (%)</label><input id="optVl" type="number" min="5" max="60" step="5" value="20"></div>
+        <div><label for="optRest">Rest target (s)</label><input id="optRest" type="number" min="15" max="600" step="15" value="120"></div>
+      </div>
+      <p class="hint">Velocity loss is how much slower your latest rep is than the fastest early rep. Around 20% keeps 3 to 5 reps in reserve on big lifts. 40% is close to failure.</p>
+    </div>
+    <div class="card">
+      <h2>Exercise recognition</h2>
+      <p class="hint" style="margin-top:0">RepTracker learns what your exercises look like from your saved recordings, then suggests the exercise when a set doesn't match the one typed in.</p>
+      <div class="row"><button id="learn" class="secondary">Learn from recordings</button><span id="learnInfo" class="meta"></span></div>
+    </div>
+  </section>
+
+  <datalist id="exlist"></datalist>
 </main>
 
-<script>
-'use strict';
-// Must match firmware/libraries/RepBle
+<script type="module">
+import { Session, Preprocessor, fitCalibration, analyzeRecording, profileFor, zoneFor, ZONES,
+         loadVelocityProfile, classify, summarizeSet } from './engine.js';
+
+// ---------------------------------------------------------------- BLE constants (match firmware/libraries/RepBle)
 const SVC = 'a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 const SAMPLES = 'a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 const INFO = 'a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 
+const $ = id => document.getElementById(id);
+const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'msg err' : 'msg'; };
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('rt_' + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem('rt_' + k, JSON.stringify(v)); } catch (_) {} },
+};
+const fmtTime = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ZONE_COLORS = ['#5aa8ff', '#4cd18a', '#ffd84a', '#ff9a4a', '#ff5a7a'];
+const zoneColor = v => ZONE_COLORS[Math.max(0, ZONES.findIndex(z => v < z.max))];
+
+const COMMON = ['back squat', 'front squat', 'bench press', 'incline bench press', 'deadlift', 'romanian deadlift',
+  'overhead press', 'barbell row', 'pull-up', 'hip thrust', 'bicep curl', 'hammer curl', 'lateral raise',
+  'lat pulldown', 'triceps pushdown', 'lunge', 'leg press', 'dumbbell bench press', 'shoulder press'];
+
+// ---------------------------------------------------------------- state
 const WINDOW_S = 5;
 let rateHz = 104, accelPerG = 1000, gyroPerDps = 10;
 let cap = rateHz * WINDOW_S;
-let buf = [];             // recent samples for the graph: [ax,ay,az,gx,gy,gz] in g and deg/s
+let buf = [], vzBuf = [];
 let nextIdx = null, missing = 0, recvCount = 0, rateT0 = performance.now();
 let device = null, wakeLock = null;
-let rec = null;           // active recording
-let countdownTimer = null;
-
-const $ = id => document.getElementById(id);
-const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'msg err' : 'msg'; };
+const demo = new URLSearchParams(location.search).has('demo');
 const isLive = () => demo || !!(device && device.gatt && device.gatt.connected);
 
+// raw ring buffer (60 s) so every detected set can be saved as a labelled recording
+const RING = 104 * 60;
+const ringRaw = new Int16Array(RING * 6), ringIdx = new Float64Array(RING);
+let ringN = 0;          // total samples written
+let engineCount = 0;    // samples pushed into the engine (absolute frame index base)
+let engineIdx0 = null;  // board index of engine frame 0
+
+// ---------------------------------------------------------------- tabs
+for (const b of $('tabs').querySelectorAll('button')) b.onclick = () => showTab(b.dataset.tab);
+function showTab(name) {
+  for (const b of $('tabs').querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === name);
+  for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'tab-' + name;
+  store.set('tab', name);
+  if (name === 'history') renderHistory();
+  if (name === 'record') renderSets();
+}
+
+// ---------------------------------------------------------------- settings
+const opts = {
+  voice: store.get('voice', true), voiceVel: store.get('voiceVel', true), vibe: store.get('vibe', true),
+  vl: store.get('vl', 20), rest: store.get('rest', 120),
+};
+$('optVoice').checked = opts.voice; $('optVoiceVel').checked = opts.voiceVel; $('optVibe').checked = opts.vibe;
+$('optVl').value = opts.vl; $('optRest').value = opts.rest;
+const bindOpt = (id, key, num) => $(id).onchange = () => { opts[key] = num ? Number($(id).value) : $(id).checked; store.set(key, opts[key]); renderLiveSet(); };
+bindOpt('optVoice', 'voice'); bindOpt('optVoiceVel', 'voiceVel'); bindOpt('optVibe', 'vibe'); bindOpt('optVl', 'vl', true); bindOpt('optRest', 'rest', true);
+
+function say(text) {
+  if (!opts.voice || !('speechSynthesis' in window)) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.15; speechSynthesis.speak(u); } catch (_) {}
+}
+function buzz(p) { if (!opts.vibe) return; try { navigator.vibrate && navigator.vibrate(p); } catch (_) {} }
+
+// ---------------------------------------------------------------- calibration (stored per browser)
+let calib = store.get('calib', null);
+function calText() { $('calState').textContent = calib ? 'yes' : 'no'; $('calInfo').textContent = calib ? `fit error ${(calib.residual * 1000).toFixed(1)} mg, ${new Date(calib.at).toLocaleDateString()}` : ''; }
+calText();
+
+// ---------------------------------------------------------------- engine session + workout
+let session = null;
+let workout = store.get('workout', null);      // { id, startedAt, sets: [...] } current, unfinished
+if (workout && Date.now() - workout.startedAt > 8 * 3600e3) workout = null;
+let liveSet = null;                              // set being performed
+let lastSetEndAt = workout && workout.sets.length ? workout.sets[workout.sets.length - 1].endedAt : 0;
+let vlAlerted = false;
+let library = store.get('library', []);
+
+function newSession() {
+  session = new Session({
+    fs: rateHz, calib, exercise: $('wEx').value.trim(), loadKg: Number($('wLoad').value) || 0,
+    onSetStart: S => { liveSet = S; vlAlerted = false; $('endSet').disabled = false; buzz(60); renderLiveSet(); },
+    onRep: (rep, S) => { liveSet = S; onRep(rep, S); },
+    onSetEnd: set => onSetEnd(set),
+  });
+  engineCount = 0; engineIdx0 = null;
+}
+
+function onRep(rep, S) {
+  const n = S.liveReps.length;
+  buzz(40);
+  if (opts.voiceVel && rep.mcv > 0) say(`${n}. ${rep.mcv.toFixed(2).replace(/^0/, '')}`);
+  else say(String(n));
+  renderLiveSet();
+  const vl = velocityLoss(S.liveReps);
+  if (!vlAlerted && n >= 3 && vl * 100 >= opts.vl) {
+    vlAlerted = true;
+    buzz([200, 100, 200]);
+    setTimeout(() => say(`Velocity loss ${Math.round(vl * 100)} percent. Stop here.`), 700);
+  }
+}
+
+function velocityLoss(reps) {
+  if (!reps.length) return 0;
+  const best = Math.max(...reps.slice(0, 3).map(r => r.mcv)), last = reps[reps.length - 1].mcv;
+  return best > 0 ? Math.max(0, (best - last) / best) : 0;
+}
+
+function onSetEnd(set) {
+  liveSet = null;
+  $('endSet').disabled = true;
+  if (!set.reps.length) return;
+  set.place = $('wPlace').value;
+  set.endedAt = Date.now();
+  set.startedAt = set.startedAt || set.endedAt;
+  // exercise suggestion from what the user's own recordings look like
+  if (library.length >= 2) {
+    const c = classify(set.features, library);
+    if (c && c.confidence > 0.6 && c.label.toLowerCase() !== (set.exercise || '').toLowerCase()) set.suggest = c;
+  }
+  if (!workout) workout = { id: 'rt-' + Date.now(), startedAt: set.startedAt, sets: [] };
+  set.restBefore = lastSetEndAt ? Math.round((set.startedAt - lastSetEndAt) / 1000) : null;
+  lastSetEndAt = set.endedAt;
+  workout.sets.push(slimSet(set));
+  store.set('workout', workout);
+  saveRawForSet(set);
+  say(`Set done. ${set.reps.length} reps.`);
+  renderLiveSet(); renderWorkout();
+}
+
+// keep only what is worth storing
+function slimSet(s) {
+  const r2 = x => Math.round(x * 100) / 100, r3 = x => Math.round(x * 1000) / 1000;
+  return {
+    id: s.id, exercise: s.exercise || 'unknown', loadKg: s.loadKg || 0, place: s.place, startedAt: s.startedAt, endedAt: s.endedAt,
+    restBefore: s.restBefore, suggest: s.suggest ? { label: s.suggest.label, confidence: r2(s.suggest.confidence) } : null,
+    features: s.features,
+    summary: Object.fromEntries(Object.entries(s.summary).map(([k, v]) => [k, typeof v === 'number' ? r3(v) : v])),
+    reps: s.reps.map(r => ({ mcv: r3(r.mcv), pv: r3(r.pv), rom: r3(r.rom), con: r2(r.conDur), ecc: r2(r.eccDur), pause: r2(r.pauseBottom),
+      ttpv: r2(r.ttpv), hDev: r3(r.hDev), rot: Math.round(r.rotDeg), ...(r.meanPower ? { pw: Math.round(r.meanPower), ppw: Math.round(r.peakPower) } : {}) })),
+  };
+}
+
+$('endSet').onclick = () => { if (session) session.flush(); };
+
+$('wEx').onchange = $('wLoad').onchange = () => {
+  store.set('wEx', $('wEx').value); store.set('wLoad', $('wLoad').value);
+  if (session) session.setExercise($('wEx').value.trim(), Number($('wLoad').value) || 0);
+  renderProfile();
+};
+$('wPlace').onchange = () => store.set('wPlace', $('wPlace').value);
+$('wEx').value = store.get('wEx', ''); $('wLoad').value = store.get('wLoad', ''); $('wPlace').value = store.get('wPlace', 'bar');
+
+function renderProfile() {
+  const p = profileFor($('wEx').value);
+  $('wProfile').textContent = $('wEx').value.trim()
+    ? `Counting ${p.concentric === 'down' ? 'downward' : 'upward'} lifts. ` + (p.mvt ? `1RM speed for this lift is about ${p.mvt} m/s, used for reps-in-reserve and 1RM estimates.` : 'No 1RM speed for this exercise, so velocity loss only.')
+    : 'Type the exercise so the count and estimates fit it. The board works out up and down by itself, any way round.';
+}
+renderProfile();
+
+// ---------------------------------------------------------------- live set panel
+function renderLiveSet() {
+  const reps = liveSet ? liveSet.liveReps : [];
+  $('wVlLimit').textContent = opts.vl + '%';
+  $('vlMark').style.left = Math.min(100, opts.vl / 50 * 100) + '%';
+  if (!reps.length) {
+    $('bigRep').textContent = '0';
+    $('wVel').innerHTML = '-<small>m/s</small>'; $('wZone').innerHTML = '&nbsp;';
+    $('vlFill').style.width = '0'; $('wVl').textContent = '0%'; $('wAlert').hidden = true;
+    ['sRom', 'sPeak', 'sTempo', 'sRir'].forEach(id => $(id).textContent = '-');
+    $('wState').textContent = !isLive() ? 'Connect the board, then just start lifting. Sets are found automatically.'
+      : lastSetEndAt ? 'Resting. Start the next set whenever you are ready.' : 'Ready. Start lifting: three steady reps start a set.';
+    drawRepBars([]);
+    return;
+  }
+  const last = reps[reps.length - 1];
+  $('bigRep').textContent = reps.length;
+  $('wState').textContent = `Set ${(workout ? workout.sets.length : 0) + 1} in progress`;
+  $('wVel').innerHTML = `${last.mcv.toFixed(2)}<small>m/s</small>`;
+  $('wVel').style.color = zoneColor(last.mcv);
+  $('wZone').textContent = zoneFor(last.mcv);
+  $('wZone').style.color = zoneColor(last.mcv);
+  const vl = velocityLoss(reps);
+  $('wVl').textContent = Math.round(vl * 100) + '%';
+  $('vlFill').style.width = Math.min(100, vl * 100 / 50 * 100) + '%';
+  $('vlFill').style.background = vl * 100 >= opts.vl ? 'var(--rec)' : vl * 100 >= opts.vl * 0.7 ? 'var(--warn)' : 'var(--y)';
+  $('wAlert').hidden = !(reps.length >= 3 && vl * 100 >= opts.vl);
+  $('wAlert').textContent = `Velocity loss ${Math.round(vl * 100)}%: stop the set`;
+  $('sRom').textContent = Math.round(last.rom * 100);
+  $('sPeak').textContent = last.pv.toFixed(2);
+  $('sTempo').textContent = `${last.eccDur.toFixed(1)}-${last.pauseBottom.toFixed(1)}-${last.conDur.toFixed(1)}`;
+  const s = summarizeSet(reps, { exercise: liveSet.exercise });
+  $('sRir').textContent = s.rir ? s.rir.text : '-';
+  drawRepBars(reps);
+}
+
+function drawRepBars(reps) {
+  const c = $('repBars'), d = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+  c.width = Math.round(r.width * d); c.height = Math.round(110 * d);
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!reps.length) return;
+  const max = Math.max(0.6, ...reps.map(x => x.mcv)) * 1.15;
+  const n = Math.max(reps.length, 8), bw = W / n;
+  const best = Math.max(...reps.slice(0, 3).map(x => x.mcv));
+  // velocity-loss threshold line
+  const th = best * (1 - opts.vl / 100), ty = H - 14 * d - th / max * (H - 24 * d);
+  ctx.strokeStyle = 'rgba(255,77,94,.7)'; ctx.setLineDash([4 * d, 4 * d]); ctx.lineWidth = d;
+  ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = `${10 * d}px system-ui, sans-serif`; ctx.textAlign = 'center';
+  reps.forEach((x, i) => {
+    const h = x.mcv / max * (H - 24 * d), px = i * bw + bw * 0.15, w = bw * 0.7;
+    ctx.fillStyle = zoneColor(x.mcv);
+    ctx.fillRect(px, H - 14 * d - h, w, h);
+    ctx.fillStyle = '#e8eaef'; ctx.fillText(x.mcv.toFixed(2), px + w / 2, H - 16 * d - h - 2 * d);
+    ctx.fillStyle = '#8b92a1'; ctx.fillText(String(i + 1), px + w / 2, H - 2 * d);
+  });
+}
+
+// ---------------------------------------------------------------- workout list
+function setChips(s) {
+  const m = s.summary, chips = [];
+  chips.push(`<span class="chip"><b>${m.meanMcv.toFixed(2)}</b> m/s mean</span>`);
+  chips.push(`<span class="chip">best <b>${m.bestMcv.toFixed(2)}</b></span>`);
+  chips.push(`<span class="chip">loss <b>${Math.round(m.velocityLoss * 100)}%</b></span>`);
+  chips.push(`<span class="chip">range <b>${Math.round(m.romMean * 100)}</b> cm</span>`);
+  chips.push(`<span class="chip">tempo <b>${esc(m.tempo)}</b></span>`);
+  chips.push(`<span class="chip">TUT <b>${m.tut.toFixed(0)}</b> s</span>`);
+  if (m.rir) chips.push(`<span class="chip">RIR <b>${esc(m.rir.text)}</b></span>`);
+  if (m.e1rmReps) chips.push(`<span class="chip">e1RM <b>${m.e1rmReps.toFixed(0)}</b> kg</span>`);
+  if (m.meanPower) chips.push(`<span class="chip">power <b>${Math.round(m.meanPower)}</b> W</span>`);
+  chips.push(`<span class="chip">consistency <b>${m.consistency}</b></span>`);
+  if (m.hDevMean > 0.015) chips.push(`<span class="chip">bar drift <b>${Math.round(m.hDevMean * 100)}</b> cm</span>`);
+  return chips.join('');
+}
+function repTable(s) {
+  const pw = s.reps.some(r => r.pw);
+  return `<table><tr><th>#</th><th>m/s</th><th>peak</th><th>cm</th><th>down s</th><th>up s</th>${pw ? '<th>W</th>' : ''}</tr>` +
+    s.reps.map((r, i) => `<tr><td>${i + 1}</td><td style="color:${zoneColor(r.mcv)}">${r.mcv.toFixed(2)}</td><td>${r.pv.toFixed(2)}</td><td>${Math.round(r.rom * 100)}</td><td>${r.ecc.toFixed(1)}</td><td>${r.con.toFixed(1)}</td>${pw ? `<td>${r.pw || ''}</td>` : ''}</tr>`).join('') + '</table>';
+}
+
+function renderWorkout() {
+  const ul = $('wSets');
+  const sets = workout ? workout.sets : [];
+  $('finishWorkout').disabled = !sets.length;
+  if (!sets.length) { ul.innerHTML = '<li class="empty">Sets you do will appear here with speed, range, tempo and fatigue.</li>'; $('wTotals').textContent = ''; return; }
+  ul.innerHTML = sets.map((s, i) => `<li>
+    <div class="sethead"><span class="name">${i + 1}. ${esc(s.exercise)}${s.loadKg ? ' &middot; ' + s.loadKg + ' kg' : ''} &times; ${s.reps.length}</span>
+      <span class="meta">${new Date(s.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${s.restBefore ? ' &middot; rest ' + fmtTime(s.restBefore) : ''}</span></div>
+    ${s.suggest ? `<div class="meta" style="color:var(--warn)">Looks like ${esc(s.suggest.label)} (${Math.round(s.suggest.confidence * 100)}%) <button class="small secondary" data-act="rename" data-i="${i}">Use</button></div>` : ''}
+    <div class="chips">${setChips(s)}</div>
+    <details><summary>Reps and edits</summary>${repTable(s)}
+      <div class="row" style="margin-top:8px">
+        <label style="margin:0">Reps <input type="number" min="0" value="${s.reps.length}" data-act="reps" data-i="${i}" style="width:64px"></label>
+        <label style="margin:0">Load kg <input type="number" min="0" step="0.5" value="${s.loadKg || ''}" data-act="load" data-i="${i}" style="width:80px"></label>
+        <span class="spacer"></span><button class="small secondary" data-act="del" data-i="${i}">Delete set</button></div>
+    </details></li>`).join('');
+  const reps = sets.reduce((a, s) => a + (s.repsOverride ?? s.reps.length), 0);
+  const vol = sets.reduce((a, s) => a + (s.loadKg || 0) * (s.repsOverride ?? s.reps.length), 0);
+  const dur = (sets[sets.length - 1].endedAt - workout.startedAt) / 1000;
+  $('wTotals').textContent = `${sets.length} sets, ${reps} reps${vol ? ', ' + Math.round(vol) + ' kg volume' : ''}, ${fmtTime(dur)} long.`;
+}
+$('wSets').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b || !workout) return;
+  const s = workout.sets[Number(b.dataset.i)];
+  if (b.dataset.act === 'del' && confirm('Delete this set?')) workout.sets.splice(Number(b.dataset.i), 1);
+  if (b.dataset.act === 'rename' && s.suggest) { s.exercise = s.suggest.label; s.suggest = null; }
+  store.set('workout', workout); renderWorkout();
+});
+$('wSets').addEventListener('change', e => {
+  const t = e.target; if (!t.dataset || !t.dataset.act || !workout) return;
+  const s = workout.sets[Number(t.dataset.i)];
+  if (t.dataset.act === 'reps') s.repsOverride = Number(t.value);
+  if (t.dataset.act === 'load') { s.loadKg = Number(t.value) || 0; }
+  store.set('workout', workout); renderWorkout();
+});
+
+$('finishWorkout').onclick = async () => {
+  if (!workout || !workout.sets.length) return;
+  if (session) session.flush();
+  workout.finishedAt = Date.now();
+  await idbPut('workouts', workout);
+  const saved = workout;
+  workout = null; lastSetEndAt = 0; store.set('workout', null);
+  renderWorkout(); renderLiveSet();
+  showTab('history');
+  openWorkout(saved);
+};
+
+// rest timer
+setInterval(() => {
+  const resting = !liveSet && lastSetEndAt && isLive();
+  $('restBox').hidden = !resting;
+  if (!resting) return;
+  const s = (Date.now() - lastSetEndAt) / 1000;
+  $('restTime').textContent = fmtTime(s);
+  $('restTime').style.color = s >= opts.rest ? 'var(--y)' : 'var(--text)';
+  if (Math.floor(s) === opts.rest) { buzz([100, 80, 100]); say('Rest done'); }
+}, 1000);
+
+// ---------------------------------------------------------------- VitaBrief export
+// Same shape as VitaBrief's gym_sessions (exercises -> sets with weight, reps, type, completedAt).
+// Sensor metrics ride along in an extra "sensor" field so nothing VitaBrief already reads changes.
+function toVitaBrief(w) {
+  const byEx = [];
+  for (const s of w.sets) {
+    let ex = byEx.find(e => e.exerciseName.toLowerCase() === s.exercise.toLowerCase());
+    if (!ex) byEx.push(ex = { exerciseName: s.exercise, sets: [] });
+    const m = s.summary;
+    ex.sets.push({
+      weight: s.loadKg || 0, reps: s.repsOverride ?? s.reps.length, type: 'working', completed: true, completedAt: s.endedAt,
+      sensor: {
+        source: 'reptracker', placement: s.place, meanVelocity: m.meanMcv, bestVelocity: m.bestMcv, velocityLoss: m.velocityLoss,
+        romCm: Math.round(m.romMean * 100), tempo: m.tempo, tutSec: Math.round(m.tut), rir: m.rir ? m.rir.value : null,
+        e1rmKg: m.e1rmReps ? Math.round(m.e1rmReps) : null, meanPowerW: m.meanPower ? Math.round(m.meanPower) : null,
+        restBeforeSec: s.restBefore, zone: m.zone,
+        reps: s.reps.map(r => ({ v: r.mcv, pv: r.pv, romCm: Math.round(r.rom * 100), up: r.con, down: r.ecc })),
+      },
+    });
+  }
+  return {
+    format: 'vitabrief-gym-session', version: 1,
+    session: {
+      id: w.id, name: 'RepTracker workout', startedAt: w.startedAt, completedAt: w.finishedAt || w.sets[w.sets.length - 1].endedAt,
+      templateId: null, notes: '', source: 'reptracker', importedAt: Date.now(), exercises: byEx,
+    },
+  };
+}
+function workoutCsv(w) {
+  const head = 'workout_id,set,exercise,load_kg,rep,mcv_ms,peak_ms,rom_cm,down_s,up_s,power_w,set_velocity_loss,set_rir,rest_before_s\n';
+  const lines = [];
+  w.sets.forEach((s, i) => s.reps.forEach((r, k) => lines.push([w.id, i + 1, csvCell(s.exercise), s.loadKg || '', k + 1, r.mcv, r.pv, Math.round(r.rom * 100), r.ecc, r.con, r.pw || '',
+    s.summary.velocityLoss, s.summary.rir ? s.summary.rir.value : '', s.restBefore ?? ''].join(','))));
+  return head + lines.join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------- history
+async function renderHistory() {
+  const all = (await idbAll('workouts')).sort((a, b) => b.startedAt - a.startedAt);
+  const ul = $('hList');
+  if (!all.length) ul.innerHTML = '<li class="empty">Finished workouts show up here.</li>';
+  else ul.innerHTML = all.map(w => {
+    const exs = [...new Set(w.sets.map(s => s.exercise))];
+    return `<li><div class="sethead"><span class="name">${new Date(w.startedAt).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+      <span class="meta">${w.sets.length} sets &middot; ${esc(exs.join(', '))}</span></div>
+      <div class="row" style="margin-top:6px"><button class="small secondary" data-open="${w.id}">Open</button>
+      <button class="small" data-vb="${w.id}">Copy for VitaBrief</button>
+      <button class="small secondary" data-json="${w.id}">JSON</button><button class="small secondary" data-csv="${w.id}">CSV</button>
+      <span class="spacer"></span><button class="small secondary" data-del="${w.id}">Delete</button></div>
+      <div data-detail="${w.id}"></div></li>`;
+  }).join('');
+  // exercise picker for trends
+  const exs = [...new Set(all.flatMap(w => w.sets.map(s => s.exercise)))];
+  const cur = $('hEx').value || store.get('hEx', exs[0]);
+  $('hEx').innerHTML = exs.map(e => `<option${e === cur ? ' selected' : ''}>${esc(e)}</option>`).join('');
+  drawTrend(all);
+}
+$('hEx').onchange = async () => { store.set('hEx', $('hEx').value); drawTrend(await idbAll('workouts')); };
+
+$('hList').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const id = b.dataset.open || b.dataset.vb || b.dataset.json || b.dataset.csv || b.dataset.del;
+  const w = id && await idbGet('workouts', id); if (!w) return;
+  if (b.dataset.open) openWorkout(w);
+  if (b.dataset.vb) {
+    const text = JSON.stringify(toVitaBrief(w));
+    try { await navigator.clipboard.writeText(text); setMsg('Copied. Paste it into VitaBrief\'s import when that is added.'); }
+    catch (_) { download('reptracker_vitabrief_' + stamp(w.startedAt) + '.json', text, 'application/json'); }
+  }
+  if (b.dataset.json) download('reptracker_vitabrief_' + stamp(w.startedAt) + '.json', JSON.stringify(toVitaBrief(w), null, 1), 'application/json');
+  if (b.dataset.csv) download('reptracker_workout_' + stamp(w.startedAt) + '.csv', workoutCsv(w));
+  if (b.dataset.del && confirm('Delete this workout?')) { await idbDel('workouts', id); renderHistory(); }
+});
+
+function openWorkout(w) {
+  const el = document.querySelector(`[data-detail="${w.id}"]`); if (!el) { renderHistory().then(() => openWorkout(w)); return; }
+  if (el.innerHTML) { el.innerHTML = ''; return; }
+  // per exercise: load-velocity profile when several loads were used
+  const byEx = {};
+  for (const s of w.sets) (byEx[s.exercise] ||= []).push(s);
+  let html = '';
+  for (const [ex, sets] of Object.entries(byEx)) {
+    const prof = profileFor(ex);
+    const lv = loadVelocityProfile(sets.map(s => ({ loadKg: s.loadKg, mcv: s.summary.bestMcv })), prof.mvt);
+    html += `<h3>${esc(ex)}</h3>`;
+    if (lv) html += `<div class="meta">Load-velocity 1RM estimate <b style="color:var(--text)">${lv.e1rm.toFixed(0)} kg</b> (fit R&sup2; ${lv.r2.toFixed(2)}, ${lv.points} sets)</div>`;
+    html += sets.map(s => `<div style="margin-top:8px"><b>${s.loadKg ? s.loadKg + ' kg ' : ''}&times; ${s.repsOverride ?? s.reps.length}</b><div class="chips">${setChips(s)}</div>${repTable(s)}</div>`).join('');
+  }
+  el.innerHTML = html;
+}
+
+function drawTrend(all) {
+  const ex = $('hEx').value;
+  const c = $('hChart'), d = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+  c.width = Math.round(r.width * d); c.height = Math.round(200 * d);
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  const pts = [];
+  const prof = profileFor(ex);
+  for (const w of [...all].sort((a, b) => a.startedAt - b.startedAt)) {
+    const sets = w.sets.filter(s => s.exercise === ex);
+    if (!sets.length) continue;
+    const lv = loadVelocityProfile(sets.map(s => ({ loadKg: s.loadKg, mcv: s.summary.bestMcv })), prof.mvt);
+    const e1 = lv ? lv.e1rm : Math.max(0, ...sets.map(s => s.summary.e1rmReps || 0));
+    const best = Math.max(...sets.map(s => s.summary.bestMcv));
+    pts.push({ t: w.startedAt, e1, best });
+  }
+  $('hHint').textContent = !ex ? 'Finish a workout to see progress.' : pts.length < 2 ? 'Progress lines appear after two workouts with this exercise.'
+    : 'Purple: estimated 1RM (kg). Green: fastest rep of the day (m/s).';
+  $('hProfile').innerHTML = '';
+  if (pts.length < 1) return;
+  const pad = 28 * d, plot = (key, color, unit) => {
+    const vals = pts.map(p => p[key]).filter(v => v > 0); if (!vals.length) return;
+    const lo = Math.min(...vals) * 0.95, hi = Math.max(...vals) * 1.05 || 1;
+    const t0 = pts[0].t, t1 = pts[pts.length - 1].t || t0 + 1;
+    const X = t => pts.length < 2 ? W / 2 : pad + (t - t0) / (t1 - t0 || 1) * (W - 2 * pad);
+    const Y = v => H - pad - (v - lo) / (hi - lo || 1) * (H - 2 * pad);
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2 * d; ctx.beginPath();
+    pts.forEach((p, i) => { if (!(p[key] > 0)) return; const x = X(p.t), y = Y(p[key]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    ctx.font = `${11 * d}px system-ui, sans-serif`;
+    pts.forEach(p => { if (!(p[key] > 0)) return; ctx.beginPath(); ctx.arc(X(p.t), Y(p[key]), 3 * d, 0, 7); ctx.fill(); });
+    const lp = pts[pts.length - 1];
+    if (lp[key] > 0) ctx.fillText(lp[key].toFixed(unit === 'kg' ? 0 : 2) + ' ' + unit, Math.min(W - 60 * d, X(lp.t) + 6 * d), Y(lp[key]) + (unit === 'kg' ? -8 : 16) * d);
+  };
+  plot('e1', '#8b7cff', 'kg');
+  plot('best', '#4cd18a', 'm/s');
+}
+
+// ---------------------------------------------------------------- connection + data
 function setState(connected, label) {
   $('state').textContent = label;
   $('dot').className = connected ? 'dot on' : 'dot';
   $('connect').hidden = connected;
   $('disconnect').hidden = !connected;
   $('record').disabled = !connected || !!rec || !!countdownTimer;
+  $('calStart').disabled = !connected;
 }
 
-// ---- incoming data ----
 // Packet: [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
 function onPacket(ev) {
   const dv = ev.target.value;
@@ -148,28 +723,33 @@ function onPacket(ev) {
   }
 }
 
-// One sample: index from the board plus six raw integers.
+const vzPre = new Preprocessor(104);
+const vzFr = {};
+let vzV = 0;
 function ingest(idx, raw) {
   if (nextIdx !== null && idx > nextIdx) missing += idx - nextIdx;
+  if (nextIdx !== null && idx < nextIdx - 1000) { nextIdx = null; newSession(); }   // board restarted
   nextIdx = idx + 1;
-  const s = [raw[0] / accelPerG, raw[1] / accelPerG, raw[2] / accelPerG,
-             raw[3] / gyroPerDps, raw[4] / gyroPerDps, raw[5] / gyroPerDps];
-  buf.push(s);
-  if (buf.length > cap) buf.splice(0, buf.length - cap);
+  const s = [raw[0] / accelPerG, raw[1] / accelPerG, raw[2] / accelPerG, raw[3] / gyroPerDps, raw[4] / gyroPerDps, raw[5] / gyroPerDps];
+  buf.push(s); if (buf.length > cap) buf.splice(0, buf.length - cap);
   recvCount++;
-  if (rec) {
-    if (rec.startIdx === null) rec.startIdx = idx;
-    rec.idx.push(idx - rec.startIdx);
-    for (let k = 0; k < 6; k++) rec.raw.push(raw[k]);
-  }
+  // raw ring
+  const j = ringN % RING; ringIdx[j] = idx; for (let k = 0; k < 6; k++) ringRaw[j * 6 + k] = raw[k]; ringN++;
+  // engine
+  if (!session) newSession();
+  if (engineIdx0 === null) engineIdx0 = idx;
+  session.push(s, idx);
+  // live vertical speed (display only, leaky)
+  vzPre.calib = calib;
+  const fr = vzPre.step(s, vzFr);
+  vzV = fr.still ? 0 : vzV * 0.995 + fr.lz / 104;
+  vzBuf.push(vzV); if (vzBuf.length > cap) vzBuf.splice(0, vzBuf.length - cap);
+  if (rec) recPush(idx, raw);
+  if (cal) calPush(s);
 }
 
-// ---- connection ----
 async function connect() {
-  if (!navigator.bluetooth) {
-    setMsg('Bluetooth is not available in this browser. Use Chrome (Samsung Internet does not support it).', true);
-    return;
-  }
+  if (!navigator.bluetooth) { setMsg('Bluetooth is not available in this browser. Use Chrome (Samsung Internet does not support it).', true); return; }
   try {
     setMsg('');
     device = await navigator.bluetooth.requestDevice({ filters: [{ name: 'RepTracker' }], optionalServices: [SVC] });
@@ -182,135 +762,191 @@ async function connect() {
     cap = rateHz * WINDOW_S;
     const chr = await svc.getCharacteristic(SAMPLES);
     chr.addEventListener('characteristicvaluechanged', onPacket);
-    buf = []; nextIdx = null; missing = 0;
+    buf = []; vzBuf = []; nextIdx = null; missing = 0;
+    newSession();
     await chr.startNotifications();
     setState(true, 'Streaming');
-    keepAwake();
+    keepAwake(); renderLiveSet();
   } catch (e) {
     setState(false, 'Not connected');
-    if (e.name !== 'NotFoundError') setMsg(e.message, true);  // NotFoundError = chooser cancelled
+    if (e.name !== 'NotFoundError') setMsg(e.message, true);
   }
 }
-
 function onDisconnected() {
+  if (session) session.flush();
   cancelCountdown();
-  const wasRecording = !!rec;
-  if (rec) stopRecording(true);
-  else resetRecUi();
+  if (rec) stopRecording(true); else resetRecUi();
   setState(false, 'Disconnected');
-  if (!wasRecording) setMsg('Lost connection. Tap Connect to reconnect.');
+  setMsg('Lost connection. Tap Connect to reconnect. Your workout so far is kept.');
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  renderLiveSet();
 }
-
-async function keepAwake() {
-  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
-}
+async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {} }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isLive()) keepAwake(); });
-
 $('connect').onclick = connect;
 $('disconnect').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); };
 
-// ---- recording ----
-function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {} }
+// ---------------------------------------------------------------- calibration wizard
+let cal = null;
+function renderFaces() { $('faces').innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="${cal && cal.points.length > i ? 'done' : ''}">${i + 1}</span>`).join(''); }
+renderFaces();
+$('calStart').onclick = () => { cal = { points: [], biases: [], win: [], stillSince: 0 }; renderFaces(); $('calInfo').textContent = 'Lay it on side 1 and keep it still...'; };
+$('calReset').onclick = () => { calib = null; store.set('calib', null); calText(); newSession(); };
+function calPush(s) {
+  cal.win.push(s); if (cal.win.length > 208) cal.win.shift();
+  if (cal.win.length < 208) return;
+  const m = [0, 1, 2, 3, 4, 5].map(k => cal.win.reduce((a, x) => a + x[k], 0) / cal.win.length);
+  const sd = Math.sqrt(cal.win.reduce((a, x) => a + (Math.hypot(x[0], x[1], x[2]) - Math.hypot(m[0], m[1], m[2])) ** 2, 0) / cal.win.length);
+  const gyroQuiet = cal.win.every(x => Math.hypot(x[3] - m[3], x[4] - m[4], x[5] - m[5]) < 3);
+  if (sd > 0.004 || !gyroQuiet) return;
+  const n = Math.hypot(m[0], m[1], m[2]), u = [m[0] / n, m[1] / n, m[2] / n];
+  // must be a new side: at least 60 degrees from every side captured so far
+  if (cal.points.some(p => { const pn = Math.hypot(p[0], p[1], p[2]); return (p[0] * u[0] + p[1] * u[1] + p[2] * u[2]) / pn > 0.5; })) return;
+  cal.points.push(m.slice(0, 3)); cal.biases.push(m.slice(3)); cal.win = [];
+  buzz(120); renderFaces();
+  if (cal.points.length < 6) { $('calInfo').textContent = `Side ${cal.points.length} done. Now side ${cal.points.length + 1}.`; return; }
+  const fit = fitCalibration(cal.points);
+  if (!fit) { $('calInfo').textContent = 'That did not fit well. Try again, holding each side still.'; cal = null; return; }
+  const gb = [0, 1, 2].map(k => cal.biases.reduce((a, b) => a + b[k], 0) / cal.biases.length);
+  calib = { ...fit, gyroBias: gb, at: Date.now() };
+  store.set('calib', calib); cal = null; calText(); newSession();
+  say('Calibration done');
+}
 
+// ---------------------------------------------------------------- exercise learning + accuracy
+$('learn').onclick = async () => {
+  const recs = await idbAll('sets');
+  const lib = [];
+  for (const r of recs) {
+    const { sets } = analyzeRecording(recToSamples(r), { fs: r.rateHz, exercise: r.exercise, calib, indices: Array.from(r.idx) });
+    for (const s of sets) if (s.reps.length >= 2) lib.push({ label: r.exercise, features: s.features });
+  }
+  library = lib; store.set('library', lib);
+  const labels = [...new Set(lib.map(l => l.label))];
+  $('learnInfo').textContent = lib.length ? `Learned ${lib.length} sets of ${labels.length} exercises: ${labels.join(', ')}` : 'No usable recordings yet.';
+};
+$('learnInfo').textContent = library.length ? `${library.length} sets learned` : '';
+
+function recToSamples(r) {
+  const out = new Array(r.samples);
+  for (let i = 0; i < r.samples; i++) { const o = i * 6, x = r.raw;
+    out[i] = [x[o] / r.accelPerG, x[o + 1] / r.accelPerG, x[o + 2] / r.accelPerG, x[o + 3] / r.gyroPerDps, x[o + 4] / r.gyroPerDps, x[o + 5] / r.gyroPerDps]; }
+  return out;
+}
+$('checkAll').onclick = async () => {
+  const recs = (await idbAll('sets')).filter(r => r.reps !== null && r.reps !== undefined);
+  if (!recs.length) { $('accuracy').innerHTML = '<p class="hint">Record sets with the real rep count typed in, then check again.</p>'; return; }
+  let exact = 0, within1 = 0; const rows = [];
+  for (const r of recs.sort((a, b) => a.id - b.id)) {
+    const { sets } = analyzeRecording(recToSamples(r), { fs: r.rateHz, exercise: r.exercise, calib, indices: Array.from(r.idx) });
+    const found = sets.reduce((a, s) => a + s.reps.length, 0);
+    const mcv = sets.length ? sets[0].summary.meanMcv : 0, rom = sets.length ? sets[0].summary.romMean : 0;
+    if (found === r.reps) exact++; if (Math.abs(found - r.reps) <= 1) within1++;
+    rows.push(`<tr><td>${esc(r.exercise)}</td><td>${r.reps}</td><td style="color:${found === r.reps ? 'var(--y)' : Math.abs(found - r.reps) <= 1 ? 'var(--warn)' : 'var(--x)'}">${found}</td><td>${mcv ? mcv.toFixed(2) : '-'}</td><td>${rom ? Math.round(rom * 100) : '-'}</td></tr>`);
+  }
+  $('accuracy').innerHTML = `<p style="margin:0 0 6px"><b>${exact}/${recs.length}</b> sets counted exactly, <b>${within1}/${recs.length}</b> within one rep.</p>
+    <table><tr><th>exercise</th><th>real</th><th>found</th><th>m/s</th><th>cm</th></tr>${rows.join('')}</table>`;
+};
+
+// ---------------------------------------------------------------- raw recording (Stage 4)
+let rec = null, countdownTimer = null;
+function recPush(idx, raw) {
+  if (rec.startIdx === null) rec.startIdx = idx;
+  rec.idx.push(idx - rec.startIdx);
+  for (let k = 0; k < 6; k++) rec.raw.push(raw[k]);
+}
 $('record').onclick = () => {
   const ex = $('exercise').value.trim();
   if (!ex) { setMsg('Type the exercise name first.', true); $('exercise').focus(); return; }
   setMsg('');
-  try { localStorage.setItem('rt_last', JSON.stringify({ ex, pl: $('placement').value })); } catch (_) {}
+  store.set('last', { ex, pl: $('placement').value });
   if (!$('countdown').checked) return startRecording();
   let n = 3;
-  $('record').disabled = true;
-  $('stop').hidden = false;
-  $('recinfo').className = 'recinfo live';
-  $('recinfo').textContent = 'Starting in ' + n;
+  $('record').disabled = true; $('stop').hidden = false;
+  $('recinfo').className = 'recinfo live'; $('recinfo').textContent = 'Starting in ' + n;
   buzz(80);
   countdownTimer = setInterval(() => {
     n--;
     if (n > 0) { $('recinfo').textContent = 'Starting in ' + n; buzz(80); return; }
-    cancelCountdown();
-    startRecording();
+    cancelCountdown(); startRecording();
   }, 1000);
 };
-
-function cancelCountdown() {
-  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
-}
-
+function cancelCountdown() { if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; } }
 function startRecording() {
   if (!isLive()) { resetRecUi(); return; }
-  rec = {
-    exercise: $('exercise').value.trim(), placement: $('placement').value,
-    reps: $('reps').value === '' ? null : Number($('reps').value),
-    startIdx: null, idx: [], raw: [], missingAtStart: missing,
-    rateHz, accelPerG, gyroPerDps,
-  };
+  rec = { exercise: $('exercise').value.trim(), placement: $('placement').value, reps: $('reps').value === '' ? null : Number($('reps').value),
+    startIdx: null, idx: [], raw: [], missingAtStart: missing, rateHz, accelPerG, gyroPerDps };
   buzz(250);
-  $('record').disabled = true;
-  $('stop').hidden = false;
-  $('recinfo').className = 'recinfo live';
-  $('recinfo').textContent = '● REC 0.0 s';
+  $('record').disabled = true; $('stop').hidden = false;
+  $('recinfo').className = 'recinfo live'; $('recinfo').textContent = '● REC 0.0 s';
 }
-
-$('stop').onclick = () => {
-  if (countdownTimer) { cancelCountdown(); resetRecUi(); return; }
-  stopRecording(false);
-};
-
-function resetRecUi() {
-  $('stop').hidden = true;
-  $('recinfo').className = 'recinfo';
-  $('recinfo').textContent = '';
-  $('record').disabled = !isLive();
-}
-
-async function stopRecording(lostConnection) {
-  const r = rec; rec = null;
-  resetRecUi();
+$('stop').onclick = () => { if (countdownTimer) { cancelCountdown(); resetRecUi(); return; } stopRecording(false); };
+function resetRecUi() { $('stop').hidden = true; $('recinfo').className = 'recinfo'; $('recinfo').textContent = ''; $('record').disabled = !isLive(); }
+async function stopRecording(lost) {
+  const r = rec; rec = null; resetRecUi();
   if (!r || r.idx.length < 10) { if (r) setMsg('Set was too short to save.'); return; }
   buzz([80, 60, 80]);
-  // Reps typed during the set count too.
   const repsNow = $('reps').value === '' ? r.reps : Number($('reps').value);
-  const set = {
-    id: Date.now(), exercise: r.exercise, placement: r.placement, reps: repsNow,
-    rateHz: r.rateHz, accelPerG: r.accelPerG, gyroPerDps: r.gyroPerDps,
-    samples: r.idx.length, missing: missing - r.missingAtStart,
-    duration: (r.idx[r.idx.length - 1] + 1) / r.rateHz,
-    idx: Uint32Array.from(r.idx), raw: Int16Array.from(r.raw),
-    lostConnection,
-  };
-  await dbPut(set);
-  setMsg(lostConnection ? 'Connection dropped, so the set was stopped and saved.'
-    : 'Saved ' + set.exercise + ' (' + set.duration.toFixed(1) + ' s).' + (repsNow === null ? ' Add the rep count below.' : ''), lostConnection);
+  const set = { id: Date.now(), exercise: r.exercise, placement: r.placement, reps: repsNow, rateHz: r.rateHz, accelPerG: r.accelPerG, gyroPerDps: r.gyroPerDps,
+    samples: r.idx.length, missing: missing - r.missingAtStart, duration: (r.idx[r.idx.length - 1] + 1) / r.rateHz,
+    idx: Uint32Array.from(r.idx), raw: Int16Array.from(r.raw), lostConnection: lost, source: 'manual' };
+  await idbPut('sets', set);
+  setMsg(lost ? 'Connection dropped, so the set was stopped and saved.' : 'Saved ' + set.exercise + ' (' + set.duration.toFixed(1) + ' s).' + (repsNow === null ? ' Add the rep count below.' : ''), lost);
   $('reps').value = '';
   renderSets();
 }
 
-// ---- storage (IndexedDB; sets survive reloads) ----
+// Workout mode: store the raw samples of every detected set (3 s before to 2 s after) as a labelled
+// recording, so the engine can be re-tuned on real data later.
+function saveRawForSet(set) {
+  if (!set.reps.length || ringN === 0) return;
+  const fs = rateHz;
+  // engine frame index -> board sample index
+  const firstIdx = (engineIdx0 ?? 0) + set.reps[0].start - 3 * fs, lastIdx = (engineIdx0 ?? 0) + set.reps[set.reps.length - 1].top + 2 * fs;
+  const rel = [], raw = [];
+  let b0 = null;
+  for (let n = Math.max(0, ringN - RING); n < ringN; n++) {
+    const j = n % RING, bi = ringIdx[j];
+    if (bi < firstIdx || bi > lastIdx) continue;
+    if (b0 === null) b0 = bi;
+    rel.push(bi - b0);
+    for (let k = 0; k < 6; k++) raw.push(ringRaw[j * 6 + k]);
+  }
+  if (rel.length < fs) return;
+  idbPut('sets', { id: Date.now(), exercise: set.exercise || 'unknown', placement: $('wPlace').value, reps: set.reps.length, repsSource: 'auto',
+    rateHz, accelPerG, gyroPerDps, samples: rel.length, missing: 0, duration: (rel[rel.length - 1] + 1) / rateHz,
+    idx: Uint32Array.from(rel), raw: Int16Array.from(raw), source: 'workout' });
+}
+
+// ---------------------------------------------------------------- IndexedDB
 let dbp = null;
 function db() {
   if (!dbp) dbp = new Promise((res, rej) => {
-    const q = indexedDB.open('reptracker', 1);
-    q.onupgradeneeded = () => q.result.createObjectStore('sets', { keyPath: 'id' });
+    const q = indexedDB.open('reptracker', 2);
+    q.onupgradeneeded = () => {
+      const d = q.result;
+      if (!d.objectStoreNames.contains('sets')) d.createObjectStore('sets', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('workouts')) d.createObjectStore('workouts', { keyPath: 'id' });
+    };
     q.onsuccess = () => res(q.result);
     q.onerror = () => rej(q.error);
   });
   return dbp;
 }
-async function tx(mode, fn) {
+async function tx(storeName, mode, fn) {
   const d = await db();
   return new Promise((res, rej) => {
-    const t = d.transaction('sets', mode), req = fn(t.objectStore('sets'));
+    const t = d.transaction(storeName, mode), req = fn(t.objectStore(storeName));
     t.oncomplete = () => res(req && req.result);
     t.onerror = () => rej(t.error);
   });
 }
-const dbPut = set => tx('readwrite', st => st.put(set)).catch(e => setMsg('Could not save the set: ' + e.message, true));
-const dbAll = () => tx('readonly', st => st.getAll()).catch(() => []);
-const dbDel = id => tx('readwrite', st => st.delete(id));
-const dbGet = id => tx('readonly', st => st.get(id));
+const idbPut = (s, v) => tx(s, 'readwrite', st => st.put(v)).catch(e => setMsg('Could not save: ' + e.message, true));
+const idbAll = s => tx(s, 'readonly', st => st.getAll()).catch(() => []);
+const idbDel = (s, id) => tx(s, 'readwrite', st => st.delete(id));
+const idbGet = (s, id) => tx(s, 'readonly', st => st.get(id));
 
-// ---- CSV ----
+// ---------------------------------------------------------------- recordings list + CSV
 const CSV_HEAD = 'set_id,exercise,placement,reps,sample,t_s,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n';
 function csvCell(v) { v = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function setRows(s) {
@@ -325,148 +961,143 @@ function setRows(s) {
   return lines.join('\n') + '\n';
 }
 function slug(t) { return (t || 'set').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'set'; }
-function stamp(id) { const d = new Date(id), p = n => String(n).padStart(2, '0');
-  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
+function stamp(id) { const d = new Date(id), p = n => String(n).padStart(2, '0'); return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
 function setFileName(s) { return 'reptracker_' + stamp(s.id) + '_' + slug(s.exercise) + (s.reps !== null ? '_' + s.reps + 'reps' : '') + '.csv'; }
-
-function download(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+function download(name, text, type = 'text/csv') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-
-async function allCsv() {
-  const sets = (await dbAll()).sort((a, b) => a.id - b.id);
-  return { sets, text: CSV_HEAD + sets.map(setRows).join('') };
-}
-
-$('downloadAll').onclick = async () => {
-  const { sets, text } = await allCsv();
-  if (!sets.length) return setMsg('No sets recorded yet.');
-  download('reptracker_all_' + stamp(Date.now()) + '.csv', text);
-};
-
+async function allCsv() { const sets = (await idbAll('sets')).sort((a, b) => a.id - b.id); return { sets, text: CSV_HEAD + sets.map(setRows).join('') }; }
+$('downloadAll').onclick = async () => { const { sets, text } = await allCsv(); if (!sets.length) return setMsg('No recordings yet.'); download('reptracker_all_' + stamp(Date.now()) + '.csv', text); };
 const canShareFiles = (() => { try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.csv', { type: 'text/csv' })] })); } catch (_) { return false; } })();
 $('shareAll').hidden = !canShareFiles;
 $('shareAll').onclick = async () => {
-  const { sets, text } = await allCsv();
-  if (!sets.length) return setMsg('No sets recorded yet.');
+  const { sets, text } = await allCsv(); if (!sets.length) return setMsg('No recordings yet.');
   const file = new File([text], 'reptracker_all_' + stamp(Date.now()) + '.csv', { type: 'text/csv' });
-  try { await navigator.share({ files: [file], title: 'RepTracker sets' }); }
-  catch (e) { if (e.name !== 'AbortError') setMsg('Share failed: ' + e.message, true); }
+  try { await navigator.share({ files: [file], title: 'RepTracker recordings' }); } catch (e) { if (e.name !== 'AbortError') setMsg('Share failed: ' + e.message, true); }
 };
-
-// ---- saved sets list ----
 async function renderSets() {
-  const sets = (await dbAll()).sort((a, b) => b.id - a.id);
-  const ul = $('sets');
-  ul.textContent = '';
-  if (!sets.length) {
-    const li = document.createElement('li'); li.className = 'empty';
-    li.textContent = 'No sets yet. Connect, type the exercise, then tap Record.'; ul.appendChild(li);
-  }
-  const names = new Set();
+  const sets = (await idbAll('sets')).sort((a, b) => b.id - a.id);
+  const ul = $('sets'); ul.textContent = '';
+  if (!sets.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No recordings yet.'; ul.appendChild(li); }
   for (const s of sets) {
-    names.add(s.exercise);
     const li = document.createElement('li');
     const info = document.createElement('div');
-    const name = document.createElement('div'); name.className = 'name'; name.textContent = s.exercise;
+    const name = document.createElement('div'); name.className = 'name'; name.style.fontWeight = '600'; name.textContent = s.exercise + (s.source === 'workout' ? ' (auto)' : '');
     const meta = document.createElement('div'); meta.className = 'meta';
-    meta.textContent = new Date(s.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + s.placement +
-      ' · ' + s.duration.toFixed(1) + ' s · ' + s.samples + ' samples' + (s.missing ? ' · ' + s.missing + ' missing' : '');
+    meta.textContent = new Date(s.id).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' · ' + s.placement + ' · ' + s.duration.toFixed(1) + ' s' + (s.missing ? ' · ' + s.missing + ' missing' : '');
     info.append(name, meta);
     const acts = document.createElement('div'); acts.className = 'acts';
-    const reps = document.createElement('input');
-    reps.type = 'number'; reps.inputMode = 'numeric'; reps.min = '0'; reps.placeholder = 'reps';
+    const reps = document.createElement('input'); reps.type = 'number'; reps.inputMode = 'numeric'; reps.min = '0'; reps.placeholder = 'reps';
     reps.value = s.reps === null ? '' : s.reps; reps.title = 'Reps done';
-    reps.onchange = async () => {
-      const full = await dbGet(s.id); if (!full) return;
-      full.reps = reps.value === '' ? null : Number(reps.value); await dbPut(full);
-    };
+    reps.onchange = async () => { const full = await idbGet('sets', s.id); if (!full) return; full.reps = reps.value === '' ? null : Number(reps.value); full.repsSource = 'user'; await idbPut('sets', full); };
     const dl = document.createElement('button'); dl.className = 'small secondary'; dl.textContent = 'CSV';
-    dl.onclick = async () => { const full = await dbGet(s.id); if (full) download(setFileName(full), CSV_HEAD + setRows(full)); };
+    dl.onclick = async () => { const full = await idbGet('sets', s.id); if (full) download(setFileName(full), CSV_HEAD + setRows(full)); };
     const del = document.createElement('button'); del.className = 'small secondary'; del.textContent = 'Delete';
-    del.onclick = async () => { if (confirm('Delete this ' + s.exercise + ' set?')) { await dbDel(s.id); renderSets(); } };
-    acts.append(reps, dl, del);
-    li.append(info, acts);
-    ul.appendChild(li);
+    del.onclick = async () => { if (confirm('Delete this ' + s.exercise + ' recording?')) { await idbDel('sets', s.id); renderSets(); } };
+    acts.append(reps, dl, del); li.append(info, acts); ul.appendChild(li);
   }
-  const dlist = $('exlist'); dlist.textContent = '';
-  for (const n of names) { const o = document.createElement('option'); o.value = n; dlist.appendChild(o); }
 }
 
-// ---- drawing ----
-function sizeCanvas(c) {
+// ---------------------------------------------------------------- live graphs
+function sizeCanvas(c, hCss) {
   const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
-  if (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d)) {
-    c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
-  }
+  const w = Math.round(r.width * d), h = Math.round(hCss * d);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
   return d;
 }
-
-// Symmetric range around zero that grows to fit the data (never below minRange).
-function draw(canvas, offset, minRange) {
-  const d = sizeCanvas(canvas), ctx = canvas.getContext('2d');
+function draw(canvas, series, minRange, hCss, colors) {
+  if (!canvas.offsetParent) return;
+  const d = sizeCanvas(canvas, hCss), ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   let range = minRange;
-  for (const s of buf) for (let k = 0; k < 3; k++) range = Math.max(range, Math.abs(s[offset + k]));
+  for (const s of series) for (const v of s) range = Math.max(range, Math.abs(v));
   range = niceCeil(range * 1.1);
   const y = v => H / 2 - (v / range) * (H / 2 - 4 * d);
-
-  ctx.strokeStyle = '#262a33'; ctx.lineWidth = d; ctx.fillStyle = '#8b92a1';
-  ctx.font = `${11 * d}px system-ui, sans-serif`;
+  ctx.strokeStyle = '#262a33'; ctx.lineWidth = d; ctx.fillStyle = '#8b92a1'; ctx.font = `${11 * d}px system-ui, sans-serif`;
   for (const v of [range, range / 2, 0, -range / 2, -range]) {
     ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(W, y(v)); ctx.stroke();
-    ctx.fillText(fmt(v), 4 * d, v === range ? y(v) + 12 * d : y(v) - 3 * d);  // top label sits below its line
+    ctx.fillText(fmt(v), 4 * d, v === range ? y(v) + 12 * d : y(v) - 3 * d);
   }
-  const colors = ['#ff6b6b', '#4cd18a', '#5aa8ff'];
-  const dx = W / (cap - 1), start = cap - buf.length;
+  const dx = W / (cap - 1);
   ctx.lineWidth = 1.6 * d; ctx.lineJoin = 'round';
-  for (let k = 0; k < 3; k++) {
+  series.forEach((s, k) => {
+    const start = cap - s.length;
     ctx.strokeStyle = colors[k]; ctx.beginPath();
-    buf.forEach((s, i) => { const px = (start + i) * dx, py = y(s[offset + k]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    s.forEach((v, i) => { const px = (start + i) * dx, py = y(v); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
     ctx.stroke();
-  }
+  });
 }
 function niceCeil(v) { const p = 10 ** Math.floor(Math.log10(v)); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p; return 10 * p; }
 function fmt(v) { return Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1); }
+const col = k => buf.map(s => s[k]);
 
 function frame() {
-  draw($('accel'), 0, 1.2);
-  draw($('gyro'), 3, 50);
-  const s = buf[buf.length - 1];
-  if (s) ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((id, k) => $(id).textContent = s[k].toFixed(k < 3 ? 2 : 0));
+  if (!$('tab-live').hidden) {
+    draw($('accel'), [col(0), col(1), col(2)], 1.2, 170, ['#ff6b6b', '#4cd18a', '#5aa8ff']);
+    draw($('gyro'), [col(3), col(4), col(5)], 50, 170, ['#ff6b6b', '#4cd18a', '#5aa8ff']);
+    draw($('vzc'), [vzBuf], 0.5, 140, ['#8b7cff']);
+    const s = buf[buf.length - 1];
+    if (s) ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((id, k) => $(id).textContent = s[k].toFixed(k < 3 ? 2 : 0));
+    if (vzBuf.length) $('vzNow').textContent = vzBuf[vzBuf.length - 1].toFixed(2);
+  }
   if (rec) $('recinfo').textContent = '● REC ' + (rec.idx.length / rateHz).toFixed(1) + ' s';
   const now = performance.now();
   if (now - rateT0 >= 1000) {
     $('rate').textContent = isLive() ? Math.round(recvCount * 1000 / (now - rateT0)) + ' Hz' : '-';
-    recvCount = 0; rateT0 = now;
-    $('missing').textContent = missing;
+    recvCount = 0; rateT0 = now; $('missing').textContent = missing;
   }
   requestAnimationFrame(frame);
 }
 
-// ?demo feeds fake data so the page can be checked without the board.
-const demo = new URLSearchParams(location.search).has('demo');
+// ---------------------------------------------------------------- demo mode (?demo): simulated squats
 if (demo) {
-  let t = 0;
   setState(true, 'Demo data');
+  $('wEx').value ||= 'back squat'; $('wLoad').value ||= '100';
+  newSession();
+  let t = 0;
+  // world: still 3 s, then reps of 0.5 m with slowing concentrics, 30 s rest, repeat. Sensor mounted flat.
+  const plan = []; const addRep = (ecc, con) => plan.push({ ecc, con });
+  const sched = [];
+  let clock = 3;
+  for (let set = 0; set < 3; set++) {
+    for (let k = 0; k < 6; k++) { const con = 0.7 * (1 + 0.08 * k); sched.push({ t0: clock, ecc: 1.4, con }); clock += 1.4 + 0.15 + con + 0.6; }
+    clock += 25;
+  }
+  const mj = s => s * s * s * (10 - 15 * s + 6 * s * s), mjA = s => (60 * s - 180 * s * s + 120 * s * s * s);
+  const accAt = time => {
+    for (const r of sched) {
+      const a = time - r.t0;
+      if (a >= 0 && a < r.ecc) return -0.5 * mjA(a / r.ecc) / (r.ecc * r.ecc);
+      const b = a - r.ecc - 0.15;
+      if (b >= 0 && b < r.con) return 0.5 * mjA(b / r.con) / (r.con * r.con);
+    }
+    return 0;
+  };
   setInterval(() => {
     for (let i = 0; i < 8; i++, t++) {
-      const p = t / rateHz, rep = Math.sin(p * 2 * Math.PI / 2.5);
-      ingest(t, [Math.round(50 * Math.sin(p * 7)), Math.round(300 * rep), Math.round(1000 + 400 * rep * rep),
-                 Math.round(1200 * Math.cos(p * 2 * Math.PI / 2.5)), Math.round(80 * Math.sin(p * 3)), -30]);
+      const time = t / 104, a = accAt(time) / 9.80665;
+      const n = () => (Math.random() - 0.5) * 4;
+      ingest(t, [Math.round(n()), Math.round(n()), Math.round((1 + a) * 1000 + n()), Math.round(n()), Math.round(n()), Math.round(n())]);
     }
-  }, 8000 / rateHz);
+  }, 8000 / 104);
 }
 
+// ---------------------------------------------------------------- start up
 try {
-  const last = JSON.parse(localStorage.getItem('rt_last') || 'null');
+  const last = store.get('last', null);
   if (last) { $('exercise').value = last.ex || ''; $('placement').value = last.pl || 'wrist'; }
 } catch (_) {}
-renderSets();
+(async () => {
+  const names = new Set(COMMON);
+  for (const r of await idbAll('sets')) names.add(r.exercise);
+  for (const w of await idbAll('workouts')) for (const s of w.sets) names.add(s.exercise);
+  $('exlist').innerHTML = [...names].map(n => `<option value="${esc(n)}">`).join('');
+})();
+renderWorkout(); renderLiveSet();
+showTab(store.get('tab', 'workout'));
 requestAnimationFrame(frame);
 </script>
 </body>

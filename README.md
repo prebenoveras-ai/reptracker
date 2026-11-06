@@ -48,13 +48,73 @@ In `imu_serial`, type `v` + Enter for the slow readable view, or `c` + Enter for
 - `firmware/imu_serial`: Stage 2, prints IMU samples over USB serial
 - `firmware/libraries/RepBle`: reusable BLE streaming module (batched notifications)
 - `firmware/imu_ble`: Stage 3, streams IMU samples over BLE as "RepTracker"
-- `docs/index.html`: Stage 3, Web Bluetooth page with live graphs (`?demo` shows fake data)
+- `docs/index.html`: the phone app (Workout, Live, Record, History, Setup). `?demo` plays simulated squats
+- `docs/engine.js`: the analysis engine (runs in the browser and in Node)
+- `tools/sim.mjs`: IMU simulator for squat, bench, deadlift, OHP, curl, lateral raise, pulldown and rest
+- `tools/bench.mjs`: accuracy bench (`node tools/bench.mjs [perKind] [seed] [kinds]`)
+- `tools/test.mjs`: regression checks (`npm test`)
+- `tools/debug.mjs`: trace one simulated session
+
+## How the engine works
+
+1. **Stillness.** Steady readings that also total exactly 1 g. While still for a full second it learns the gyro offset and the real gravity reading.
+2. **Orientation.** A Madgwick filter tracks which way is up, so the board can sit any way round on the bar or wrist.
+3. **Vertical acceleration.** Readings are rotated to the world frame and gravity is removed.
+4. **Drift-free speed.** Integrated to velocity, then drift is removed by forcing velocity to zero where it truly is zero: long still periods, and every turnaround at the top and bottom of a rep. This takes three passes, each refining the turnarounds.
+5. **Reps.** Position swings found with an adaptive hysteresis. Each concentric swing is a rep. Set-up moves (unracking, picking a dumbbell up) are dropped by size and wrist rotation. A pause in the middle of a move splits it.
+6. **Sets.** Three steady reps start a set live. Shorter sets are picked up when the bar is put down. A rep that comes far off the set's rhythm ends it.
+7. **Metrics per rep.** Mean concentric velocity (over the part moving at 10% or more of peak), peak velocity, range of motion, eccentric, pause and concentric time, time to peak velocity, bar drift, wrist rotation, and power (with load).
+8. **Per set.** Velocity loss, reps in reserve (velocity trend vs the lift's 1RM velocity), estimated 1RM (Epley including reps left, or a load-velocity profile when several loads were lifted), time under tension, tempo and a consistency score.
+
+### Simulated accuracy
+
+`node tools/bench.mjs 12 7` covers 185 sets the engine was not tuned on. It uses pessimistic noise: about 6x the accelerometer noise and 3-5x the gyro noise of the real board.
+
+| Exercise | Sets found | Exact rep count | Within 1 | ROM error | Velocity error |
+|---|---|---|---|---|---|
+| Squat | 96% | 92% | 92% | 3.1 cm | 2.5% |
+| Bench | 100% | 100% | 100% | 2.1 cm | 2.0% |
+| Deadlift | 100% | 100% | 100% | 4.2 cm | 3.6% |
+| Overhead press | 100% | 95% | 100% | 2.7 cm | 1.9% |
+| Curl (wrist) | 85% | 26% | 48% | 5.5 cm | 3.8% |
+| Lateral raise (wrist) | 77% | 35% | 65% | 5.2 cm | 6.1% |
+| Lat pulldown (wrist) | 80% | 53% | 73% | 5.4 cm | 4.6% |
+
+Barbell work is solid. Wrist work is not yet. Real recordings (the Record tab's **Check accuracy**) are the next step for tuning it.
+
+Real board, 40 s still on a desk: accelerometer noise 0.0005 g, gyro noise 0.03-0.06 deg/s, 0 lost samples, 0 false sets.
 
 ## Phone page
 
 Hosted on GitHub Pages from `docs/`: https://prebenoveras-ai.github.io/reptracker/
 
 Open it in **Chrome** on Android. Samsung Internet doesn't support Web Bluetooth. Add `?demo` to the address to see fake data without the board.
+
+### Workout tab
+
+Type the exercise and load, then lift. Sets are found automatically. You get a big live rep count, each rep's speed coloured by training zone, velocity loss against your stop limit, range, peak speed, tempo and reps in reserve. Optionally the phone speaks the count and speed, and vibrates. A rest timer starts when the set ends. **Finish & save** stores the workout in History.
+
+### History tab
+
+Shows past workouts with per-rep tables, a load-velocity 1RM per exercise, and a trend chart of estimated 1RM and best speed. Export options are **Copy for VitaBrief** (JSON on the clipboard), **JSON** and **CSV**.
+
+### VitaBrief export format
+
+```
+{ format: "vitabrief-gym-session", version: 1,
+  session: { id, name, startedAt, completedAt, templateId: null, notes, source: "reptracker", importedAt,
+    exercises: [ { exerciseName, sets: [ { weight, reps, type: "working", completed: true, completedAt,
+      sensor: { meanVelocity, bestVelocity, velocityLoss, romCm, tempo, tutSec, rir, e1rmKg, meanPowerW,
+                restBeforeSec, zone, placement, reps: [ { v, pv, romCm, up, down } ] } } ] } ] } }
+```
+
+This is the same shape as VitaBrief's `gym_sessions`. VitaBrief still has to map `exerciseName` to its catalogue (as `stravaEnsureExercise` does for Lyfta). The extra `sensor` field is add-only.
+
+### Setup tab
+
+- **6-side calibration.** Fixes per-axis gain and offset, and stores the gyro offset.
+- **Feedback options.**
+- **Exercise recognition.** Learns from your recordings (nearest neighbour on per-set features).
 
 ### Recording sets (Stage 4)
 
