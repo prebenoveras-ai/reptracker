@@ -29,6 +29,20 @@ The board shows up on COM3 when it's running a sketch. During upload it briefly 
 
 If the upload hangs or the board doesn't show up as a COM port, double-tap the reset button quickly. That forces the bootloader. Then upload again.
 
+Sketches that use our own modules also need `--libraries C:\Users\Preben\RepTracker\firmware\libraries`.
+
+The COM number changes depending on what's running: COM3 for blink, COM6 for sketches that use USB serial, COM5 for the bootloader. Run `arduino-cli board list` to check.
+
+## Serial monitor
+
+```
+arduino-cli monitor -p COM6 -c baudrate=115200
+```
+
+In `imu_serial`, type `v` + Enter for the slow readable view, or `c` + Enter for CSV at the full rate.
+
 ## Layout
 
 - `firmware/blink`: Stage 1 LED test (cycles red, green, blue)
+- `firmware/libraries/RepImu`: reusable IMU module (104 Hz, +-8 g, +-1000 dps)
+- `firmware/imu_serial`: Stage 2, prints IMU samples over USB serial
