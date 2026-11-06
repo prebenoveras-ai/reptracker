@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>RepTracker</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #262a33; --text: #e8eaef; --muted: #8b92a1;
+    --x: #ff6b6b; --y: #4cd18a; --z: #5aa8ff; --accent: #8b7cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; flex: 1; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px;
+    background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: var(--line); color: var(--text); }
+  button:disabled { opacity: .5; }
+  .status { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .status b { color: var(--text); font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .dot.on { background: var(--y); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+  .card h2 { font-size: 14px; margin: 0 0 6px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .vals { font: 13px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
+  .vals span { display: inline-block; min-width: 70px; text-align: right; }
+  .x { color: var(--x); } .y { color: var(--y); } .z { color: var(--z); }
+  canvas { width: 100%; height: 180px; display: block; }
+  .msg { color: var(--muted); font-size: 13px; }
+  .err { color: var(--x); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>RepTracker</h1>
+    <button id="connect">Connect</button>
+    <button id="disconnect" class="secondary" hidden>Disconnect</button>
+  </header>
+  <div class="status">
+    <div><span id="dot" class="dot"></span><b id="state">Not connected</b></div>
+    <div>Rate <b id="rate">-</b></div>
+    <div>Missing <b id="missing">0</b></div>
+  </div>
+  <p id="msg" class="msg"></p>
+
+  <section class="card">
+    <h2>Acceleration (g)
+      <span class="vals"><span class="x" id="ax">-</span><span class="y" id="ay">-</span><span class="z" id="az">-</span></span></h2>
+    <canvas id="accel"></canvas>
+  </section>
+  <section class="card">
+    <h2>Rotation (deg/s)
+      <span class="vals"><span class="x" id="gx">-</span><span class="y" id="gy">-</span><span class="z" id="gz">-</span></span></h2>
+    <canvas id="gyro"></canvas>
+  </section>
+  <p class="msg"><span class="x">X</span> along the board (toward USB) &middot; <span class="y">Y</span> across it &middot; <span class="z">Z</span> out of the chip side. Last 5 seconds.</p>
+</main>
+
+<script>
+'use strict';
+// Must match firmware/libraries/RepBle
+const SVC = 'a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
+const SAMPLES = 'a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
+const INFO = 'a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
+
+const WINDOW_S = 5;
+let rateHz = 104, accelPerG = 1000, gyroPerDps = 10;
+let cap = rateHz * WINDOW_S;
+let buf = [];             // recent samples: [ax,ay,az,gx,gy,gz]
+let nextIdx = null, missing = 0, recvCount = 0, rateT0 = performance.now();
+let device = null, wakeLock = null;
+
+const $ = id => document.getElementById(id);
+const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'msg err' : 'msg'; };
+
+function setState(connected, label) {
+  $('state').textContent = label;
+  $('dot').className = connected ? 'dot on' : 'dot';
+  $('connect').hidden = connected;
+  $('disconnect').hidden = !connected;
+}
+
+// Packet: [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
+function onPacket(ev) {
+  const dv = ev.target.value;
+  const idx = dv.getUint32(0, true), n = dv.getUint8(4);
+  if (nextIdx !== null && idx > nextIdx) missing += idx - nextIdx;
+  nextIdx = idx + n;
+  for (let i = 0; i < n; i++) {
+    const o = 5 + i * 12;
+    pushSample([
+      dv.getInt16(o, true) / accelPerG, dv.getInt16(o + 2, true) / accelPerG, dv.getInt16(o + 4, true) / accelPerG,
+      dv.getInt16(o + 6, true) / gyroPerDps, dv.getInt16(o + 8, true) / gyroPerDps, dv.getInt16(o + 10, true) / gyroPerDps,
+    ]);
+  }
+}
+
+function pushSample(s) {
+  buf.push(s);
+  if (buf.length > cap) buf.splice(0, buf.length - cap);
+  recvCount++;
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    setMsg('Web Bluetooth is not available. Use Chrome on Android or desktop, over https.', true);
+    return;
+  }
+  try {
+    setMsg('');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ name: 'RepTracker' }], optionalServices: [SVC] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    setState(false, 'Connecting...');
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    const info = await (await svc.getCharacteristic(INFO)).readValue();
+    rateHz = info.getUint16(0, true); accelPerG = info.getUint16(2, true); gyroPerDps = info.getUint16(4, true);
+    cap = rateHz * WINDOW_S;
+    const chr = await svc.getCharacteristic(SAMPLES);
+    chr.addEventListener('characteristicvaluechanged', onPacket);
+    buf = []; nextIdx = null; missing = 0;
+    await chr.startNotifications();
+    setState(true, 'Streaming');
+    keepAwake();
+  } catch (e) {
+    setState(false, 'Not connected');
+    if (e.name !== 'NotFoundError') setMsg(e.message, true);  // NotFoundError = chooser cancelled
+  }
+}
+
+function onDisconnected() {
+  setState(false, 'Disconnected');
+  setMsg('Lost connection. Tap Connect to reconnect.');
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+}
+
+$('connect').onclick = connect;
+$('disconnect').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); };
+
+// ---- drawing ----
+function sizeCanvas(c) {
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d)) {
+    c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
+  }
+  return d;
+}
+
+// Symmetric range around zero that grows to fit the data (never below minRange).
+function draw(canvas, offset, minRange) {
+  const d = sizeCanvas(canvas), ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  let range = minRange;
+  for (const s of buf) for (let k = 0; k < 3; k++) range = Math.max(range, Math.abs(s[offset + k]));
+  range = niceCeil(range * 1.1);
+  const y = v => H / 2 - (v / range) * (H / 2 - 4 * d);
+
+  ctx.strokeStyle = '#262a33'; ctx.lineWidth = d; ctx.fillStyle = '#8b92a1';
+  ctx.font = `${11 * d}px system-ui, sans-serif`;
+  for (const v of [range, range / 2, 0, -range / 2, -range]) {
+    ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(W, y(v)); ctx.stroke();
+    ctx.fillText(fmt(v), 4 * d, v === range ? y(v) + 12 * d : y(v) - 3 * d);  // top label sits below its line
+  }
+  const colors = ['#ff6b6b', '#4cd18a', '#5aa8ff'];
+  const dx = W / (cap - 1), start = cap - buf.length;
+  ctx.lineWidth = 1.6 * d; ctx.lineJoin = 'round';
+  for (let k = 0; k < 3; k++) {
+    ctx.strokeStyle = colors[k]; ctx.beginPath();
+    buf.forEach((s, i) => { const px = (start + i) * dx, py = y(s[offset + k]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    ctx.stroke();
+  }
+}
+function niceCeil(v) { const p = 10 ** Math.floor(Math.log10(v)); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p; return 10 * p; }
+function fmt(v) { return Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1); }
+
+function frame() {
+  draw($('accel'), 0, 1.2);
+  draw($('gyro'), 3, 50);
+  const s = buf[buf.length - 1];
+  if (s) ['ax', 'ay', 'az', 'gx', 'gy', 'gz'].forEach((id, k) => $(id).textContent = s[k].toFixed(k < 3 ? 2 : 0));
+  const now = performance.now();
+  if (now - rateT0 >= 1000) {
+    $('rate').textContent = device && device.gatt && device.gatt.connected || demo ? Math.round(recvCount * 1000 / (now - rateT0)) + ' Hz' : '-';
+    recvCount = 0; rateT0 = now;
+    $('missing').textContent = missing;
+  }
+  requestAnimationFrame(frame);
+}
+
+// ?demo feeds fake data so the page can be checked without the board.
+const demo = new URLSearchParams(location.search).has('demo');
+if (demo) {
+  let t = 0;
+  setState(true, 'Demo data');
+  setInterval(() => {
+    for (let i = 0; i < 8; i++, t++) {
+      const p = t / rateHz, rep = Math.sin(p * 2 * Math.PI / 2.5);
+      pushSample([0.05 * Math.sin(p * 7), 0.3 * rep, 1 + 0.4 * rep * rep, 120 * Math.cos(p * 2 * Math.PI / 2.5), 8 * Math.sin(p * 3), -3]);
+    }
+  }, 8000 / rateHz);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

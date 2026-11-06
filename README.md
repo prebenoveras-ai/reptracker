@@ -46,3 +46,18 @@ In `imu_serial`, type `v` + Enter for the slow readable view, or `c` + Enter for
 - `firmware/blink`: Stage 1 LED test (cycles red, green, blue)
 - `firmware/libraries/RepImu`: reusable IMU module (104 Hz, +-8 g, +-1000 dps)
 - `firmware/imu_serial`: Stage 2, prints IMU samples over USB serial
+- `firmware/libraries/RepBle`: reusable BLE streaming module (batched notifications)
+- `firmware/imu_ble`: Stage 3, streams IMU samples over BLE as "RepTracker"
+- `web/index.html`: Stage 3, Web Bluetooth page with live graphs (`?demo` shows fake data)
+
+## BLE protocol
+
+| What | UUID | Format |
+|---|---|---|
+| Service | `a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e` | |
+| Samples (notify) | `a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e` | `u32 firstSampleIndex, u8 count, count x (ax ay az gx gy gz as i16)`, little endian |
+| Info (read) | `a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e` | `u16 rateHz, u16 accelPerG (1000), u16 gyroPerDps (10)` |
+
+With MTU 247, each packet carries 8 samples (about 13 packets a second). Gaps in `firstSampleIndex` show lost samples.
+
+LED while running `imu_ble`: blue blink = waiting for a phone, solid green = streaming, fast red blink = IMU error.
