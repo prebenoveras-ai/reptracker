@@ -1,0 +1,9 @@
+{
+  "name": "reptracker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node tools/bench.mjs",
+    "test": "node tools/test.mjs"
+  }
+}
