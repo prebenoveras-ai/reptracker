@@ -12,7 +12,8 @@
 //   - Moving the board wakes it; it restarts and is advertising again within about a second.
 //
 // Quick test build (short timeouts so you don't have to wait minutes):
-//   add  --build-property "build.extra_flags=-DREP_QUICK_TEST"  to the arduino-cli compile command.
+//   add  --build-property "compiler.cpp.extra_flags=-DREP_QUICK_TEST"  to the arduino-cli compile
+//   command. (Don't use build.extra_flags: it replaces the board's own chip definition.)
 
 #include <Adafruit_TinyUSB.h>  // Seeed: needed for Serial on the non-mbed nRF52 core
 #include <RepImu.h>

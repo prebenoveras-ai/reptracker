@@ -1,4 +1,20 @@
-# RepTracker handover (2026-11-06)
+# RepTracker handover (2026-11-06, sleep section added 2026-11-10)
+
+## Sleep and wake (written 2026-11-10 - NOT yet confirmed on the real board)
+
+The board now puts itself to sleep when it lies still and wakes when it is moved. Code: `firmware/libraries/RepPower` (new), wake mode in `RepImu` (`armWake`), `RepBle::stop()`, and the sequence in `firmware/imu_ble/imu_ble.ino` (`goToSleep()`).
+
+- **Wake:** the IMU's wake-up interrupt (accelerometer only, 26 Hz, 62 mg jolt, latched) drives its INT1 pin, which is nRF pin P0.11 (Arduino D18, from the Seeed board definition). That pin is the System OFF wake source. Waking resets the board, so it boots straight back into streaming/advertising.
+- **Sleep rules** (constants at the top of `imu_ble.ino`): nothing moved for 15 min with a phone connected, or 4 min with nobody connected. "Moved" = acceleration changes more than 0.05 g from its own half-second average, or rotation above 8 deg/s, for at least 3 samples in a row. Board noise is 0.0005 g / 0.05 dps, so vibration doesn't count. A phone connecting or leaving restarts the timer.
+- **Never sleeps on USB power** (charging, flashing, serial monitor). Set `SLEEP_WHEN_USB_POWERED = true` only to test sleep on a cable.
+- **Order on the way down:** two short red flashes, stop advertising and hang up, put the IMU into watch mode and check INT1 is low, then System OFF. If INT1 won't settle (board being moved) it restarts instead of sleeping. **Wake:** one short green flash.
+- **Charging** is set to 100 mA (P0.13 driven low, per the Seeed wiki). `FAST_CHARGE = false` goes back to 50 mA.
+- **Quick test build** (20 s / 40 s timeouts): add `--build-property "compiler.cpp.extra_flags=-DREP_QUICK_TEST"` to the compile command. Don't use `build.extra_flags`, it removes the chip definition.
+- **Reset button / bootloader:** untouched. Double-tap reset still gives the XIAO-SENSE drive.
+
+**App behaviour when the board sleeps (unchanged, needs your decision):** both the RepTracker page and VitaBrief save what they have and show "disconnected" when the link drops. Neither reconnects by itself, so after the board wakes you tap Connect (or the Reps button in VitaBrief) again. Sleep only happens after 15 min still while connected, so it shouldn't cut a set. Auto-reconnect would be a separate app change.
+
+**Not verified:** (1) that the IMU keeps its power pin high in System OFF (the Nordic forums say GPIO levels are kept; the real test is whether it wakes), (2) the IMU register bits, which come from ST's AN4650 for the older LSM6DS3 (the TR-C datasheet would not download), (3) sleep current. Expected asleep: tens of microamps, so months on 600 mAh, with the battery's own self-discharge as the limit. Expected awake and streaming: roughly 4-8 mA (the main loop never idles the CPU), so a few days of continuous use. These are estimates; measure before trusting them.
 
 ## Built while you were away
 
