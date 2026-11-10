@@ -24,6 +24,13 @@ class RepBle {
   // True when a phone is connected and listening for samples.
   bool streaming() const;
 
+  // True when a phone is connected, even if it isn't listening for samples yet.
+  bool connected() const;
+
+  // Stops advertising and drops any connection, so the radio can be switched off
+  // cleanly before sleeping. Doesn't restart on its own: reboot or call begin() again.
+  void stop();
+
   // Adds one sample (ax, ay, az, gx, gy, gz). Sends a packet once enough have built up.
   void push(const int16_t v[6]);
 

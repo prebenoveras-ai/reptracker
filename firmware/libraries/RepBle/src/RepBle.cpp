@@ -60,6 +60,21 @@ bool RepBle::streaming() const {
   return connHandle != BLE_CONN_HANDLE_INVALID && samplesChr.notifyEnabled(connHandle);
 }
 
+bool RepBle::connected() const {
+  return connHandle != BLE_CONN_HANDLE_INVALID;
+}
+
+void RepBle::stop() {
+  Bluefruit.Advertising.restartOnDisconnect(false);  // don't start again after we hang up
+  Bluefruit.Advertising.stop();
+  if (connHandle != BLE_CONN_HANDLE_INVALID) {
+    Bluefruit.Connection(connHandle)->disconnect();
+    uint32_t t0 = millis();
+    while (connHandle != BLE_CONN_HANDLE_INVALID && millis() - t0 < 500) delay(5);
+  }
+  count_ = 0;
+}
+
 void RepBle::push(const int16_t v[6]) {
   uint32_t idx = sampleIndex_++;
   if (!streaming()) { count_ = 0; return; }
