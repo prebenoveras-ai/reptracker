@@ -650,8 +650,17 @@ export class Session {
       const mr = median(list.map(r => r.rom)), mt = median(list.map(r => r.rotDeg));
       if (x.rom > 1.6 * mr || x.rom < 0.45 * mr) return 'reject';
       if (mt > 40 && (x.rotDeg < 0.45 * mt || x.rotDeg > 1.6 * mt)) return 'reject';
+      if (this._isRack(x, list)) return 'reject';
     }
     return 'ok';
+  }
+
+  // Racking the bar after the last rep: a bigger sweep that also turns clearly more than the reps before it
+  // (real data: 75 cm and 48 deg after eight reps of 50 cm and 23 deg).
+  _isRack(x, list) {
+    if (list.length < 3) return false;
+    const mr = median(list.map(r => r.rom)), mt = median(list.map(r => r.rotDeg));
+    return x.rom > 1.3 * mr && x.rotDeg > 1.5 * mt + 5;
   }
 
   // Keep the reps that belong together by rhythm; returns the newest group.
@@ -772,6 +781,9 @@ export class Session {
     // Final metrics come from the whole set at once; keep exactly the reps that were counted live
     // (the athlete already heard that count), each matched to its refined version.
     let reps = S.liveReps.map(x => nearestStart(r.reps, x.start, 0.35 * fs) || x);
+    // A rep is first judged on provisional numbers; with the final numbers a trailing rep can turn out to be
+    // the bar being racked. Drop it.
+    while (reps.length > 3 && this._isRack(reps[reps.length - 1], reps.slice(0, -1))) reps.pop();
     reps = reps.map((x, k) => ({ ...x, n: k + 1, provisional: false }));
     const set = {
       id: S.id, exercise: S.exercise, loadKg: S.loadKg, startedAt: S.startedAt,
