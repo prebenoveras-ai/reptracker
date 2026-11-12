@@ -16,6 +16,10 @@ The board now puts itself to sleep when it lies still and wakes when it is moved
 
 **Not verified:** (1) that the IMU keeps its power pin high in System OFF (the Nordic forums say GPIO levels are kept; the real test is whether it wakes), (2) the IMU register bits, which come from ST's AN4650 for the older LSM6DS3 (the TR-C datasheet would not download), (3) sleep current. Expected asleep: tens of microamps, so months on 600 mAh, with the battery's own self-discharge as the limit. Expected awake and streaming: roughly 4-8 mA (the main loop never idles the CPU), so a few days of continuous use. These are estimates; measure before trusting them.
 
+## Armed mode (2026-11-12)
+
+Real use showed counting only started at rep ~4: the engine waits for three steady reps before it commits to a set, then announces the earlier ones in one burst. When VitaBrief starts a recording (button + 5 s countdown) it now calls `session.setArmed(true)` at GO. Armed bar lifts start after ONE clean rep (at least 2 s of stillness first, 20 cm of range, little rotation, a lift of at least 0.35 s). Simulated result (`node tools/bench_armed.mjs 10 7`): the first rep is announced after about 1 rep instead of 3, with exact counts unchanged. Wrist-style exercises (curls, raises, pull-downs) stay at three reps because armed mode made them slightly worse in simulation. The misses and double counts seen on the real board still need real recordings to fix. VitaBrief's copy of the engine was re-copied with `scratchpad/replace_engine.cjs` (replaces the block between `const RepEngine = (() => {` and its `return {...}`).
+
 ## Built while you were away
 
 - **Analysis engine** (`docs/engine.js`). It works out which way is up from any mounting, then finds sets and reps automatically. For each rep it measures bar speed, range of motion, tempo, power, bar drift and wrist rotation. For each set it gives velocity loss, reps in reserve, estimated 1RM, time under tension and a consistency score.
