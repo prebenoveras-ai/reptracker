@@ -592,9 +592,14 @@ export class Session {
     this.sets = [];
     this.lastIdx = null;
     this.lastRaw = null;
+    // Armed = the app knows a set is about to start (the lifter pressed "start" and held still).
+    // Then a set starts after ONE clean rep instead of three, so counting begins at rep 1.
+    this.armed = !!opts.armed;
+    this.stillBefore = 0;
   }
 
   setExercise(name, loadKg) { this.exercise = name || ''; this.loadKg = Number(loadKg) || 0; }
+  setArmed(on) { this.armed = !!on; }
   get profile() { return profileFor(this.exercise); }
   get now() { return this.F.end; }
 
@@ -623,6 +628,8 @@ export class Session {
         this.longStillBefore = this.stillRun >= 4 * this.fs;
         this.lastStillEnd = now - 1; this.motionStart = now; this.singleChecked = false;
       }
+      // remember the last proper still period (2 s or more): an armed session needs one before its first rep
+      if (this.stillRun >= 2 * this.fs) this.stillBefore = this.stillRun;
       this.stillRun = 0;
     }
     if (++this.tick % 13 !== 0) return;      // analyse 8 times a second
@@ -704,7 +711,16 @@ export class Session {
     const reps = this._rhythmGroup(r.reps);
     // Three steady reps start a set live (earlier reps are counted retroactively). Sets of one or two
     // heavy reps are picked up when the bar is put down again (see _tryShort).
-    if (reps.length < 3 || r.M < 0.08) return;
+    // When armed, one clean rep is enough, as long as it follows a real rest (the countdown) and looks
+    // like real lifting: big enough, and for bar work without much rotation.
+    // Wrist-style exercises (curls, raises, pull-downs) are too noisy for this: they still need three reps
+    // until there is real data to tune them on.
+    const wristy = this.profile.kind === 'isolation' || this.profile.kind === 'pull-down';
+    if (reps.length < (this.armed && !wristy ? 1 : 3) || r.M < 0.08) return;
+    if (reps.length < 3) {
+      if (!(this.stillBefore >= 2 * fs)) return;
+      if (reps.some(x => x.rom < 0.2 || x.rotDeg > 45)) return;
+    }
     const last = reps[reps.length - 1];
     if ((now - last.top) / fs > 3) return;
     const roms = reps.map(x => x.rom), m = median(roms);
@@ -712,7 +728,8 @@ export class Session {
     if (cv > 0.35 || m < 0.12) return;   // below 12 cm it is arm swing, not a lift
     // walking swings the wrist up and down every ~0.6 s; real reps take longer
     const gaps = []; for (let k = 1; k < reps.length; k++) gaps.push((reps[k].top - reps[k - 1].top) / fs);
-    if (median(gaps) < 0.9) return;
+    // (a lone rep has no gaps: judge it by how long its lift took instead)
+    if (gaps.length ? median(gaps) < 0.9 : reps[0].conDur < 0.35) return;
     this._startSet(from, reps);
   }
 
