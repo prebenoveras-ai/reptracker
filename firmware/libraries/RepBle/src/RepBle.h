@@ -6,6 +6,7 @@
 //   Service  a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e
 //   Samples  a6e10002-...  notify  packet = [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
 //   Info     a6e10003-...  read    [u16 rateHz][u16 accelPerG][u16 gyroPerDps]
+//   Battery  a6e10004-...  read    [u16 millivolts][u8 percent][u8 flags]   (flags: bit0 charging, bit1 USB)
 //
 // Usage:
 //   RepBle ble;
@@ -20,6 +21,11 @@ class RepBle {
   // rateHz and the two scales are published in the Info characteristic so the
   // phone knows how to turn the integers back into g and deg/s.
   bool begin(const char* name, uint16_t rateHz, uint16_t accelPerG, uint16_t gyroPerDps);
+
+  // Publishes the battery state in the Battery characteristic (read by the phone):
+  //   [u16 millivolts][u8 percent][u8 flags: bit0 = charging, bit1 = USB power], little endian.
+  // mv = 0 means "unknown". Call whenever there is a new reading.
+  void setBattery(uint16_t mv, uint8_t percent, uint8_t flags);
 
   // True when a phone is connected and listening for samples.
   bool streaming() const;

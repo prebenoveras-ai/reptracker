@@ -19,6 +19,7 @@
 #include <RepImu.h>
 #include <RepBle.h>
 #include <RepPower.h>
+#include <RepBattery.h>
 
 // Fixed-point scales sent over BLE: 1000 counts per g, 10 counts per deg/s.
 // With +-8 g and +-1000 dps both fit in int16.
@@ -38,11 +39,21 @@ const float MOVE_GYRO_DPS = 8.0f;            // rotation speed that counts as mo
 const uint8_t WAKE_THRESHOLD_STEPS = 2;      // IMU wake-up jolt: 1 step = 31 mg, 2 = 62 mg
 const bool SLEEP_WHEN_USB_POWERED = false;   // true only for testing sleep on a USB cable
 const bool FAST_CHARGE = true;               // charge at 100 mA instead of 50 mA
+
+// ---- Battery gauge ------------------------------------------------------------
+// The phone reads the battery from the board. To calibrate: measure the battery with a multimeter,
+// read the voltage the board reports (serial line "batt ... mV", or the app), and set
+// BATT_TRIM = multimeter volts / reported volts (1.00 = no correction).
+const float BATT_TRIM = 1.00f;
+const uint32_t BATT_EVERY_MS = 30000;        // how often the reading is refreshed
 // -------------------------------------------------------------------------------
 
 RepImu imu;
 RepBle ble;
 RepPower power;
+RepBattery battery;
+BatteryReading batt = {0, 0, false, false};
+uint32_t lastBatt = 0;
 uint32_t count = 0, lastReport = 0;
 bool wasConnected = false;
 
@@ -60,6 +71,12 @@ static void flash(uint8_t led, uint8_t times, uint16_t onMs, uint16_t offMs = 12
     digitalWrite(led, HIGH);
     if (i + 1 < times) delay(offMs);
   }
+}
+
+// Measure the battery and hand the result to the Bluetooth module (the phone reads it from there).
+static void updateBattery() {
+  batt = battery.read();
+  ble.setBattery(batt.mv, batt.percent, (batt.charging ? 1 : 0) | (batt.usb ? 2 : 0));
 }
 
 // Switch everything off in a safe order, then sleep. Waking up restarts the board.
@@ -97,6 +114,8 @@ void setup() {
   if (!ble.begin("RepTracker", imu.rateHz(), ACCEL_PER_G, GYRO_PER_DPS)) {
     while (true) { digitalToggle(LED_RED); delay(500); }  // slow red = BLE error
   }
+  battery.begin(BATT_TRIM);
+  updateBattery();
 }
 
 void loop() {
@@ -122,11 +141,14 @@ void loop() {
   power.feed(s.t_ms, s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
   if (power.shouldSleep(connected, s.t_ms)) goToSleep();
 
+  if (s.t_ms - lastBatt >= BATT_EVERY_MS) { lastBatt = s.t_ms; updateBattery(); }
+
   if (s.t_ms - lastReport >= 1000) {
-    Serial.printf("# rate %lu Hz, %s, dropped %lu, still %lu s%s\n", (unsigned long)count,
+    Serial.printf("# rate %lu Hz, %s, dropped %lu, still %lu s%s, batt %u mV %u%%%s\n", (unsigned long)count,
                   live ? "streaming" : (connected ? "connected" : "advertising"),
                   (unsigned long)ble.dropped(), (unsigned long)power.stillSeconds(s.t_ms),
-                  RepPower::usbPowered() ? ", usb" : "");
+                  RepPower::usbPowered() ? ", usb" : "", (unsigned)batt.mv, (unsigned)batt.percent,
+                  batt.charging ? " charging" : "");
     count = 0;
     lastReport = s.t_ms;
   }

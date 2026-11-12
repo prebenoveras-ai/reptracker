@@ -4,6 +4,7 @@
 static BLEService svc("a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 static BLECharacteristic samplesChr("a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 static BLECharacteristic infoChr("a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
+static BLECharacteristic batteryChr("a6e10004-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 
 static volatile uint16_t connHandle = BLE_CONN_HANDLE_INVALID;
 
@@ -45,6 +46,12 @@ bool RepBle::begin(const char* name, uint16_t rateHz, uint16_t accelPerG, uint16
   uint16_t info[3] = {rateHz, accelPerG, gyroPerDps};
   infoChr.write(info, sizeof(info));
 
+  batteryChr.setProperties(CHR_PROPS_READ);
+  batteryChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  batteryChr.setFixedLen(4);
+  batteryChr.begin();
+  setBattery(0, 0, 0);   // unknown until the sketch measures it
+
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
   Bluefruit.Advertising.addService(svc);
@@ -54,6 +61,11 @@ bool RepBle::begin(const char* name, uint16_t rateHz, uint16_t accelPerG, uint16
   Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);              // advertise forever
   return true;
+}
+
+void RepBle::setBattery(uint16_t mv, uint8_t percent, uint8_t flags) {
+  uint8_t b[4] = { (uint8_t)(mv & 0xFF), (uint8_t)(mv >> 8), percent, flags };
+  batteryChr.write(b, sizeof(b));
 }
 
 bool RepBle::streaming() const {
