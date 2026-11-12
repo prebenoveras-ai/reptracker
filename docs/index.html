@@ -111,6 +111,7 @@
     <div>Rate <b id="rate">-</b></div>
     <div>Missing <b id="missing">0</b></div>
     <div>Calibrated <b id="calState">no</b></div>
+    <div>Battery <b id="battery">-</b></div>
   </div>
   <p id="msg" class="msg"></p>
 
@@ -277,6 +278,7 @@ import { Session, Preprocessor, fitCalibration, analyzeRecording, profileFor, zo
 const SVC = 'a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 const SAMPLES = 'a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
 const INFO = 'a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e';
+const BATT = 'a6e10004-5b1e-4f3a-9c2d-7e0f1b2c3d4e';   // [u16 mV][u8 percent][u8 flags: bit0 charging, bit1 USB]
 
 const $ = id => document.getElementById(id);
 const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'msg err' : 'msg'; };
@@ -765,6 +767,7 @@ async function connect() {
     buf = []; vzBuf = []; nextIdx = null; missing = 0;
     newSession();
     await chr.startNotifications();
+    startBattery(svc);
     setState(true, 'Streaming');
     keepAwake(); renderLiveSet();
   } catch (e) {
@@ -772,7 +775,26 @@ async function connect() {
     if (e.name !== 'NotFoundError') setMsg(e.message, true);
   }
 }
+// Battery: the board publishes it; read now and every minute. Boards with older firmware don't have it.
+let battTimer = null;
+function startBattery(svc) {
+  clearInterval(battTimer);
+  const el = $('battery');
+  const read = async () => {
+    try {
+      const dv = await (await svc.getCharacteristic(BATT)).readValue();
+      const mv = dv.getUint16(0, true), pct = dv.getUint8(2), fl = dv.getUint8(3);
+      if (!mv) return;
+      el.textContent = pct + '% (' + (mv / 1000).toFixed(2) + ' V' + (fl & 1 ? ', charging' : (fl & 2 ? ', USB' : '')) + ')';
+      el.style.color = pct <= 15 ? 'var(--bad, #ff6b6b)' : '';
+    } catch (_) { clearInterval(battTimer); el.textContent = 'update firmware'; }
+  };
+  read();
+  battTimer = setInterval(read, 60000);
+}
+
 function onDisconnected() {
+  clearInterval(battTimer);
   if (session) session.flush();
   cancelCountdown();
   if (rec) stopRecording(true); else resetRecUi();
