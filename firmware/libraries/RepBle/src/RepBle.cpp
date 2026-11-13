@@ -5,6 +5,19 @@ static BLEService svc("a6e10001-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 static BLECharacteristic samplesChr("a6e10002-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 static BLECharacteristic infoChr("a6e10003-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
 static BLECharacteristic batteryChr("a6e10004-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
+static BLECharacteristic dayStatChr("a6e10005-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
+static BLECharacteristic dayCtrlChr("a6e10006-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
+static BLECharacteristic dayLogChr("a6e10007-5b1e-4f3a-9c2d-7e0f1b2c3d4e");
+static RepBle::DayCommandFn dayCommandFn = nullptr;
+
+static void onDayCtrlWrite(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+  (void)conn; (void)chr;
+  if (!dayCommandFn || len < 1) return;
+  uint32_t arg = 0;
+  if (len >= 5) memcpy(&arg, data + 1, 4);
+  else if (len >= 2) arg = data[1];
+  dayCommandFn(data[0], arg);
+}
 
 static volatile uint16_t connHandle = BLE_CONN_HANDLE_INVALID;
 
@@ -52,6 +65,24 @@ bool RepBle::begin(const char* name, uint16_t rateHz, uint16_t accelPerG, uint16
   batteryChr.begin();
   setBattery(0, 0, 0);   // unknown until the sketch measures it
 
+  dayStatChr.setProperties(CHR_PROPS_READ);
+  dayStatChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  dayStatChr.setMaxLen(20);
+  dayStatChr.begin();
+  uint8_t none[1] = {0};
+  dayStatChr.write(none, 1);   // version 0 = no status yet
+
+  dayCtrlChr.setProperties(CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP);
+  dayCtrlChr.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  dayCtrlChr.setMaxLen(8);
+  dayCtrlChr.setWriteCallback(onDayCtrlWrite);
+  dayCtrlChr.begin();
+
+  dayLogChr.setProperties(CHR_PROPS_NOTIFY);
+  dayLogChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  dayLogChr.setMaxLen(5 + kMaxLogRecords * 4);
+  dayLogChr.begin();
+
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
   Bluefruit.Advertising.addService(svc);
@@ -66,6 +97,43 @@ bool RepBle::begin(const char* name, uint16_t rateHz, uint16_t accelPerG, uint16
 void RepBle::setBattery(uint16_t mv, uint8_t percent, uint8_t flags) {
   uint8_t b[4] = { (uint8_t)(mv & 0xFF), (uint8_t)(mv >> 8), percent, flags };
   batteryChr.write(b, sizeof(b));
+}
+
+void RepBle::onDayCommand(DayCommandFn fn) { dayCommandFn = fn; }
+
+void RepBle::setDayStatus(const uint8_t* data, uint8_t len) {
+  dayStatChr.write(data, len > 20 ? 20 : len);
+}
+
+bool RepBle::logListening() const {
+  return connHandle != BLE_CONN_HANDLE_INVALID && dayLogChr.notifyEnabled(connHandle);
+}
+
+uint8_t RepBle::logFit() const {
+  if (connHandle == BLE_CONN_HANDLE_INVALID) return 0;
+  uint16_t mtu = Bluefruit.Connection(connHandle)->getMtu();
+  if (mtu < 3 + 5 + 4) return 1;
+  uint16_t fit = (mtu - 3 - 5) / 4;
+  return fit > kMaxLogRecords ? kMaxLogRecords : (uint8_t)fit;
+}
+
+bool RepBle::sendLog(uint32_t firstMinute, const uint8_t* records, uint8_t count) {
+  if (!logListening()) return false;
+  if (count > kMaxLogRecords) count = kMaxLogRecords;
+  uint8_t pkt[5 + kMaxLogRecords * 4];
+  memcpy(pkt, &firstMinute, 4);   // little endian
+  pkt[4] = count;
+  if (count) memcpy(pkt + 5, records, (size_t)count * 4);
+  return dayLogChr.notify(connHandle, pkt, 5 + (uint16_t)count * 4);
+}
+
+void RepBle::setSlowAdvertising(bool slow) {
+  // units of 0.625 ms: fast 20 ms for the first 30 s, then 152.5 ms (normal) or about 1 s (slow)
+  Bluefruit.Advertising.setInterval(32, slow ? 1636 : 244);
+  if (connHandle == BLE_CONN_HANDLE_INVALID && Bluefruit.Advertising.isRunning()) {
+    Bluefruit.Advertising.stop();
+    Bluefruit.Advertising.start(0);
+  }
 }
 
 bool RepBle::streaming() const {

@@ -34,6 +34,17 @@ class RepImu {
 
   uint16_t rateHz() const { return cfg_.rateHz; }
 
+  // ---- Low-power watching (all-day mode) ------------------------------------
+  // on:  gyro off, accelerometer in its low-power mode at 26 Hz. poll() then returns 26 samples a
+  //      second with only the acceleration filled in (rotation reads 0). Uses a small fraction of
+  //      the normal current.
+  // off: back to the normal rate with the gyro running (it needs a moment to settle).
+  void setLowPower(bool on);
+  bool lowPower() const { return low_; }
+
+  // Milliseconds until poll() will have the next sample (0 = now). Lets the sketch sleep in between.
+  uint32_t msUntilNext() const;
+
   // ---- Sleep support --------------------------------------------------------
   // Puts the IMU into a low-power "watch for movement" mode: gyro off, accelerometer
   // at a low rate, and its wake-up interrupt routed to the INT1 pin (see wakePin()).
@@ -61,6 +72,8 @@ class RepImu {
 
  private:
   void disarmWake();
+  bool low_ = false;
+  uint8_t savedXl_ = 0, savedG_ = 0;   // CTRL1_XL / CTRL2_G as begin() left them
   ImuConfig cfg_;
   uint32_t periodUs_ = 0;
   uint32_t nextUs_ = 0;

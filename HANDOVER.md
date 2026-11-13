@@ -1,4 +1,34 @@
-# RepTracker handover (2026-11-06, sleep section added 2026-11-10)
+# RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13)
+
+## Form, strength readiness and all-day mode (2026-11-13)
+
+Three additions, all visible in VitaBrief v10.49. Tested on the PC and in the browser with simulated data. **Nothing here has run on the real board or the phone yet.**
+
+**1. Strength readiness (VitaBrief only, no firmware).** For each exercise VitaBrief learns how fast a given weight usually moves, from the first three sensor sets of your earlier workouts (last 10 weeks). After a recorded set it says how today compares ("4% slower than your usual"), gives an estimated max for today and, when the day is clearly off, a weight for the next set. It needs two earlier workouts with the sensor on that exercise first. It only means something if every rep is pushed up as fast as you can. Within 5% either way counts as a normal day. Coach and Brief get the same numbers.
+
+**2. Form (engine, `docs/engine.js`).**
+- *Sticking point:* where in the lift the bar slows down before speeding up again (percent of the way up, and how much speed is lost). Reported when at least a third of the reps show it.
+- *Bar tilt:* how many degrees one end of the bar leads mid-lift, and whether it is the same end every rep. The board cannot know how it is mounted, so the bar's direction is worked out from how the bar rolls during the set. If the bar does not roll at least a few degrees (likely on deadlifts), tilt is left out instead of guessed. **It cannot say which end leads** (left or right); that needs a set-up step that isn't built.
+- Simulated accuracy (`npm test`): tilt of 2 and 4 degrees measured within 0.12 degrees, a level bar reads level, no false sticking points in 1,200 simulated reps. Rep counting is unchanged (`node tools/bench.mjs 12 7` gives the same table as before).
+- The engine is copied into VitaBrief with `node tools/copy_to_vitabrief.mjs` (`--check` only compares). Don't edit VitaBrief's copy by hand.
+
+**3. All-day mode (firmware + VitaBrief), for wearing the board on the wrist.**
+- Switched on in VitaBrief: RepTracker sheet -> "All-day mode (wrist)". The phone tells the board, and the board remembers it across resets (not across a flat battery).
+- In this mode the board **never switches itself off**. With no phone listening it watches the accelerometer at 26 Hz in low power (gyro off) and stores one 4-byte record per minute: movement, wrist angle, turning, steps. It keeps the last 3 days in memory. When VitaBrief connects for a workout it streams at 104 Hz as usual and keeps logging.
+- The board has no clock. Minutes are numbered from when logging started, and the phone gives them real times when it collects them.
+- VitaBrief collects when you connect, with the "Collect wrist data now" button, and tries by itself when the app is opened near the board. From the minutes it works out the night's rest (start, end, still time, wake-ups, restlessness) and the day's steps, active minutes and longest still stretch. They show on the Today page and go to Coach and Brief.
+- New code: `firmware/libraries/RepDay` (the minute logger; its PC twin `tools/day.mjs` is what the tests run, keep the two identical), low-power mode in `RepImu` (`setLowPower`), three new Bluetooth values in `RepBle` (`a6e10005` status, `a6e10006` commands, `a6e10007` log), and the mode handling in `imu_ble.ino`.
+- Firmware compiles (133 KB). **Not flashed.**
+
+**Not verified, in order of how likely it is to need fixing:**
+1. Battery life in all-day mode. Nothing was measured. The design should draw well under 1 mA, which would be weeks on 600 mAh, but the earlier sleep and battery firmware is also still unconfirmed, so treat this as unknown until the board has been worn for a day and the percentage read.
+2. The app collecting by itself when opened (Android connecting to a known board without the picker). If it doesn't, the Collect button after connecting does the same job.
+3. The low-power register settings (same ST app note as the wake-up settings) and that the mode survives a reset (retained register GPREGRET2).
+4. The night and activity cut-offs (what counts as rest, a wake-up, an active minute). They are first guesses from the sleep-research method (wrist angle changes), to be tuned on your real nights. Step counting was 95% on simulated walking; real walking will differ.
+5. Unsynced minutes live in memory only: a reset or a flat battery loses whatever the phone has not collected.
+
+**First test (about 10 minutes plus a night):** flash `imu_ble`, connect in VitaBrief, check the battery still shows, switch all-day mode on, wear it for an hour, open the sheet and tap Collect. Steps and "worn" time should appear. Then wear it overnight and collect in the morning.
+
 
 ## Sleep and wake (written 2026-11-10 - NOT yet confirmed on the real board)
 

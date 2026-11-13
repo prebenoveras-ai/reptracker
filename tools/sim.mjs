@@ -57,8 +57,18 @@ class Scene {
 
 function barSet(sc, r, kind) {
   const z = sc.T('z'), x = sc.T('x'), pitch = sc.T('pitch');
+  // Optional form faults for the form tests (none of these draw random numbers, so the default
+  // sessions are exactly what they were): tiltDeg = one end leads by this much mid-lift,
+  // spinDeg = how far the bar rolls in the hands on the way down, stick = slow-down mid-lift (0..1).
+  const O = sc.opts || {}, D2R = Math.PI / 180;
+  const tilt = O.tiltDeg ? sc.T('tilt') : null, zb = O.stick ? sc.T('zb') : null;
+  const spin = (O.spinDeg || 0) * D2R;
+  const fault = (cd, rom) => {
+    if (tilt) tilt.to(cd / 2, O.tiltDeg * D2R).to(cd / 2, 0);
+    if (zb) zb.hold(cd * 0.3).to(cd * 0.25, -O.stick * rom).to(cd * 0.3, 0);
+  };
   sc.sync();
-  const n = r.i(3, 12);
+  const n = O.reps || r.i(3, 12);
   const P = {
     squat: { rom: r.u(0.45, 0.62), ecc: r.u(1.2, 2.4), con: r.u(0.55, 1.0), startTop: true, walk: 0.3, jx: 0.02 },
     bench: { rom: r.u(0.30, 0.45), ecc: r.u(0.9, 1.8), con: r.u(0.45, 0.9), startTop: true, walk: 0.3, jx: 0.07 },
@@ -78,15 +88,15 @@ function barSet(sc, r, kind) {
     const rom = P.rom * (1 + r.n(0.03));
     if (P.startTop) {
       const t0 = sc.t;
-      z.to(P.ecc * (1 + r.n(0.08)), base - rom); x.to(z.t - x.t, bx - P.jx); pitch.to(z.t - pitch.t, r.n(0.03)); sc.sync();
+      z.to(P.ecc * (1 + r.n(0.08)), base - rom); x.to(z.t - x.t, bx - P.jx); pitch.to(z.t - pitch.t, spin + r.n(0.03)); sc.sync();
       const pb = r() < 0.3 ? r.u(0.3, 1.0) : r.u(0, 0.1); sc.hold(pb);
       const cs = sc.t, cd = P.con * fat;
-      z.to(cd, base); x.to(cd, bx); pitch.to(cd, 0); sc.sync();
+      z.to(cd, base); x.to(cd, bx); pitch.to(cd, 0); fault(cd, rom); sc.sync();
       set.reps.push({ conStart: cs, conEnd: cs + cd, rom, eccStart: t0 });
       sc.hold(r.u(0.2, 1.4));
     } else {
       const cs = sc.t, cd = P.con * fat;
-      z.to(cd, base + rom); x.to(cd, bx + P.jx * 0.3); pitch.to(cd, r.n(0.03)); sc.sync();
+      z.to(cd, base + rom); x.to(cd, bx + P.jx * 0.3); pitch.to(cd, spin + r.n(0.03)); fault(cd, rom); sc.sync();
       set.reps.push({ conStart: cs, conEnd: cs + cd, rom });
       sc.hold(r.u(0.3, 1.0));
       z.to(P.ecc * (1 + r.n(0.08)), base); x.to(z.t - x.t, bx); pitch.to(z.t - pitch.t, 0); sc.sync();
@@ -138,6 +148,7 @@ function rest(sc, r, wrist, dur) {
     const mode = r();
     if (mode < 0.45) {           // walk: arm swing + body bob + turning
       const steps = r.i(4, 14), f = r.u(0.8, 1.0);
+      sc.stepCount = (sc.stepCount || 0) + 2 * steps;   // each arm swing = two steps (truth for the step counter test)
       for (let s = 0; s < steps; s++) {
         ang.to(0.5 / f, r.u(0.25, 0.4)).to(0.5 / f, -r.u(0.15, 0.3));
         z.to(0.25 / f, 0.025).to(0.25 / f, 0).to(0.25 / f, 0.025).to(0.25 / f, 0);
@@ -161,7 +172,7 @@ function rest(sc, r, wrist, dur) {
 function render(sc, r, wrist, mount, noise) {
   sc.sync();
   const N = Math.ceil((sc.t + 0.5) * FH);
-  const S = {}; for (const k of ['x', 'y', 'z', 'ang', 'yaw', 'pitch']) S[k] = (sc.tr[k] || new Track(0)).sample(N);
+  const S = {}; for (const k of ['x', 'y', 'z', 'ang', 'yaw', 'pitch', 'tilt', 'zb']) S[k] = (sc.tr[k] || new Track(0)).sample(N);
   const axis = wrist ? (sc.sets[0]?.wrist?.axis || 'y') : 'y';
   const rad = wrist ? (sc.sets[0]?.wrist?.radius || 0.32) : 0;
   const pos = new Float64Array(N * 3), quat = new Array(N);
@@ -174,8 +185,10 @@ function render(sc, r, wrist, mount, noise) {
       p = qrot(yaw, arm); p[0] += S.x[i]; p[2] += S.z[i];
       q = qmul(yaw, qa);
     } else {
+      // the bar lies along y: pitch = rolling around its own axis, tilt = one end higher than the other
       q = qmul(qaxis([0, 0, 1], 0.2 * S.yaw[i]), qaxis([0, 1, 0], S.pitch[i] * Number(process.env.PITCH ?? 1)));
-      p = [S.x[i], S.y[i], S.z[i]];
+      if (sc.tr.tilt) q = qmul(qmul(qaxis([0, 0, 1], 0.2 * S.yaw[i]), qaxis([1, 0, 0], S.tilt[i])), qaxis([0, 1, 0], S.pitch[i]));
+      p = [S.x[i], S.y[i], S.z[i] + S.zb[i]];
     }
     q = qmul(q, mount);
     if (i && q[0] * quat[i - 1][0] + q[1] * quat[i - 1][1] + q[2] * quat[i - 1][2] + q[3] * quat[i - 1][3] < 0) q = q.map(v => -v);
@@ -230,6 +243,7 @@ export function makeSession(seed, kind, opts = {}) {
   const r = rng(seed);
   const wrist = ['curl', 'lateral', 'pulldown', 'rest-only'].includes(kind);
   const sc = new Scene();
+  sc.opts = opts;
   sc.T('z'); sc.T('ang');
   const nSets = kind === 'rest-only' ? 0 : (opts.sets || r.i(1, 3));
   rest(sc, r, wrist, r.u(3, wrist ? 12 : 5));
@@ -260,5 +274,5 @@ export function makeSession(seed, kind, opts = {}) {
     set.startIdx = Math.round(set.start * FS) - 1; set.endIdx = Math.round(set.end * FS) - 1;
     for (const rep of set.reps) { rep.conStartIdx = Math.round(rep.conStart * FS) - 1; rep.conEndIdx = Math.round(rep.conEnd * FS) - 1; }
   }
-  return { kind, wrist, concentric: kind === 'pulldown' ? 'down' : 'up', sets, ...data };
+  return { kind, wrist, concentric: kind === 'pulldown' ? 'down' : 'up', sets, steps: sc.stepCount || 0, ...data };
 }

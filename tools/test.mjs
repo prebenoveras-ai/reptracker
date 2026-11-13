@@ -1,6 +1,7 @@
 // Quick regression checks for the engine. Run: npm test
-import { Preprocessor, fitCalibration, analyzeRecording, estimateRir, loadVelocityProfile, summarizeSet } from '../docs/engine.js';
+import { Preprocessor, fitCalibration, analyzeRecording, estimateRir, loadVelocityProfile, summarizeSet, stickingPoint } from '../docs/engine.js';
 import { makeSession, rng, randomQuat, FS } from './sim.mjs';
+import { DayLogger, decodeAct, decodeAngle } from './day.mjs';
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -45,5 +46,48 @@ const ok = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!
   ok(Math.abs(s.velocityLoss - 0.2) < 1e-9, `velocity loss ${(s.velocityLoss * 100).toFixed(0)}%`);
 }
 
-console.log(fail ? `\n${fail} check(s) failed` : '\nall checks passed');
+// 5. sticking point: a speed curve with a dip in the middle is found, a smooth one is not
+{
+  const fs = FS, n = fs, v = new Float64Array(n), p = new Float64Array(n);
+  const curve = dipAt => { for (let i = 0; i < n; i++) { const t = i / (n - 1); v[i] = Math.sin(Math.PI * t) * (1 - (dipAt ? 0.5 * Math.exp(-(((t - dipAt) / 0.08) ** 2)) : 0)); p[i] = (i ? p[i - 1] : 0) + v[i] / fs; } };
+  curve(0); ok(stickingPoint(v, p, 0, n - 1, 1, fs) === null, 'smooth lift: no sticking point');
+  curve(0.5); const s1 = stickingPoint(v, p, 0, n - 1, 1, fs);
+  ok(s1 && Math.abs(s1.at - 0.5) < 0.08 && s1.dip > 0.3, `dip in the middle: sticking point at ${s1 && (s1.at * 100).toFixed(0)}% of the range, ${s1 && (s1.dip * 100).toFixed(0)}% slower`);
+  curve(0.35); const s2 = stickingPoint(v, p, 0, n - 1, 1, fs);
+  ok(s2 && s2.at < s1.at, `earlier dip: sticking point lower (${s2 && (s2.at * 100).toFixed(0)}%)`);
+}
+
+// 6. form through the whole engine on simulated bench sets
+{
+  const run = (seed, o) => { const sim = makeSession(seed, 'bench', { sets: 1, reps: 8, ...o }); return analyzeRecording(sim.samples, { fs: FS, exercise: 'bench press', indices: sim.indices, calib: fitCalibration(sim.calibPoints) }).sets[0]; };
+  let worstFalse = 0, n = 0, falseStick = 0;
+  for (let s = 0; s < 8; s++) { const set = run(300 + s, { spinDeg: 12 }); if (!set) continue; n++; if (set.summary.tiltLead !== undefined) worstFalse = Math.max(worstFalse, set.summary.tiltLead); if (set.summary.stickAt !== undefined) falseStick++; }
+  ok(n >= 7 && worstFalse < 1.0, `level bar reads level (worst ${worstFalse.toFixed(2)} deg over ${n} sets)`);
+  ok(falseStick === 0, `smooth reps: no sticking point reported (${falseStick} of ${n} sets)`);
+  const errs = [];
+  for (let s = 0; s < 8; s++) for (const deg of [2, 4]) { const set = run(400 + s, { spinDeg: 12, tiltDeg: deg }); if (set && set.summary.tiltLead !== undefined) errs.push({ deg, got: set.summary.tiltLead, same: set.summary.tiltSame }); }
+  const worst = Math.max(...errs.map(e => Math.abs(e.got - e.deg)));
+  ok(errs.length >= 14 && worst < 0.8 && errs.every(e => e.same === 1), `bar tilt of 2 and 4 deg measured within ${worst.toFixed(2)} deg, same side every rep (${errs.length} sets)`);
+  const flat = run(500, { spinDeg: 0, tiltDeg: 3 });
+  ok(flat && flat.summary.tiltLead === undefined, 'a bar that does not roll: tilt is left out instead of guessed');
+  let found = 0, tot = 0; const ats = [];
+  for (let s = 0; s < 8; s++) { const set = run(600 + s, { stick: 0.14 }); if (!set) continue; tot++; if (set.summary.stickAt !== undefined) { found++; ats.push(set.summary.stickAt); } }
+  ok(found >= tot - 1 && ats.every(a => a > 0.25 && a < 0.75), `mid-lift slow-down found in ${found} of ${tot} sets (at ${ats.map(a => (a * 100).toFixed(0)).join(', ')}% of the range)`);
+}
+
+// 7. all-day logger (the PC twin of firmware/libraries/RepDay): steps, stillness, record format
+{
+  const run = (sim, usb = false) => { const lg = new DayLogger(), recs = []; for (let i = 0; i < sim.samples.length; i++) { if (sim.indices[i] % 4) continue; const s = sim.samples[i]; const r = lg.feed(sim.indices[i] * 1000 / FS, s[0], s[1], s[2], usb); if (r) recs.push(r); } return { recs, steps: recs.reduce((a, r) => a + r[3], 0) + lg.steps }; };
+  let truth = 0, got = 0;
+  for (let seed = 1; seed <= 10; seed++) { const sim = makeSession(seed * 31, 'rest-only'); truth += sim.steps; got += run(sim).steps; }
+  ok(Math.abs(got - truth) / truth < 0.15, `steps on simulated walking: ${got} counted of ${truth} (${(100 * got / truth).toFixed(0)}%)`);
+  // a board lying on a table for three minutes (with sensor noise)
+  const r = rng(9), still = { samples: [], indices: [] };
+  for (let i = 0; i < FS * 185; i++) { still.samples.push([0.02 + r.n(0.003), -0.01 + r.n(0.003), 1.04 + r.n(0.003)]); still.indices.push(i); }
+  const q = run(still, true);
+  ok(q.recs.length === 3 && q.steps === 0 && q.recs.every(x => (x[2] & 127) === 0 && decodeAct(x[0]) < 6), `still board: 3 minute records, no steps, no turning, movement ${q.recs.map(x => decodeAct(x[0]).toFixed(1)).join('/')} mg`);
+  ok(q.recs.every(x => (x[2] & 0x80) !== 0 && decodeAngle(x[1]) > 80), 'still board: USB flag set and angle reads flat on its back');
+}
+
+console.log(fail ?`\n${fail} check(s) failed` : '\nall checks passed');
 process.exit(fail ? 1 : 0);

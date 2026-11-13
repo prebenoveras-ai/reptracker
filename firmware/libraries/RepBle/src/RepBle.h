@@ -7,6 +7,9 @@
 //   Samples  a6e10002-...  notify  packet = [u32 firstSampleIndex][u8 count][count x 6 x i16], little endian
 //   Info     a6e10003-...  read    [u16 rateHz][u16 accelPerG][u16 gyroPerDps]
 //   Battery  a6e10004-...  read    [u16 millivolts][u8 percent][u8 flags]   (flags: bit0 charging, bit1 USB)
+//   DayStat  a6e10005-...  read    all-day log status, built by the sketch (see imu_ble.ino)
+//   DayCtrl  a6e10006-...  write   [u8 command][u32 argument]  (1 = all-day mode on/off, 2 = send the log from minute N)
+//   DayLog   a6e10007-...  notify  [u32 firstMinute][u8 count][count x 4 bytes]; count 0 = that was everything
 //
 // Usage:
 //   RepBle ble;
@@ -39,6 +42,30 @@ class RepBle {
 
   // Adds one sample (ax, ay, az, gx, gy, gz). Sends a packet once enough have built up.
   void push(const int16_t v[6]);
+
+  // ---- All-day log (RepBle only moves the bytes; RepDay makes them) ----------
+  // Called when the phone writes a command: cmd and a 32-bit argument (0 if none was sent).
+  // Runs on the Bluetooth task: only set a flag in it and do the work in loop().
+  typedef void (*DayCommandFn)(uint8_t cmd, uint32_t arg);
+  void onDayCommand(DayCommandFn fn);
+
+  // Publishes the status bytes the phone reads before collecting the log (up to 20 bytes).
+  void setDayStatus(const uint8_t* data, uint8_t len);
+
+  // True when a phone is connected and listening for log packets.
+  bool logListening() const;
+
+  // How many 4-byte records fit in one log packet on this connection (at most kMaxLogRecords).
+  uint8_t logFit() const;
+
+  // Sends one log packet. count 0 = "that was everything". False = radio busy, try again later.
+  bool sendLog(uint32_t firstMinute, const uint8_t* records, uint8_t count);
+
+  // Advertise once a second instead of 6 times: slower to find, but much less battery.
+  // Used in all-day mode, where the board is never switched off.
+  void setSlowAdvertising(bool slow);
+
+  static const uint8_t kMaxLogRecords = 48;
 
   // Samples that couldn't be sent (radio busy). Counted, not retried.
   uint32_t dropped() const { return dropped_; }

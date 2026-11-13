@@ -18,6 +18,7 @@ bool RepImu::begin(const ImuConfig& cfg) {
   // After waking from sleep the IMU still holds its wake-up setup: undo it.
   disarmWake();
 
+  low_ = false;
   periodUs_ = 1000000UL / cfg.rateHz;
   nextUs_ = micros();
   return true;
@@ -86,11 +87,37 @@ void RepImu::disarmWake() {
   clearWake();
 }
 
+void RepImu::setLowPower(bool on) {
+  if (on == low_) return;
+  if (on) {
+    sensor.readRegister(&savedXl_, REG_CTRL1_XL);
+    sensor.readRegister(&savedG_, REG_CTRL2_G);
+    sensor.writeRegister(REG_CTRL2_G, 0x00);                               // gyro off
+    setBits(REG_CTRL6_C, XL_HM_MODE, true);                                // accelerometer low-power mode
+    sensor.writeRegister(REG_CTRL1_XL, (savedXl_ & 0x0F) | (0x2 << 4));    // 26 Hz, same range as before
+    periodUs_ = 1000000UL / 26;
+  } else {
+    setBits(REG_CTRL6_C, XL_HM_MODE, false);
+    sensor.writeRegister(REG_CTRL1_XL, savedXl_);
+    sensor.writeRegister(REG_CTRL2_G, savedG_);
+    delay(80);                                                             // gyro start-up
+    periodUs_ = 1000000UL / cfg_.rateHz;
+  }
+  low_ = on;
+  nextUs_ = micros() + periodUs_;
+}
+
+uint32_t RepImu::msUntilNext() const {
+  int32_t d = (int32_t)(nextUs_ - micros());
+  return d <= 0 ? 0 : (uint32_t)d / 1000UL;
+}
+
 void RepImu::read(ImuSample& s) {
   s.t_ms = millis();
   s.ax = sensor.readFloatAccelX();
   s.ay = sensor.readFloatAccelY();
   s.az = sensor.readFloatAccelZ();
+  if (low_) { s.gx = s.gy = s.gz = 0; return; }   // gyro is off: don't spend time asking it
   s.gx = sensor.readFloatGyroX();
   s.gy = sensor.readFloatGyroY();
   s.gz = sensor.readFloatGyroZ();

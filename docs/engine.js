@@ -472,10 +472,114 @@ export function analyzeWindow(F, a, b, opts) {
       rotDeg: c.rot,
       provisional: c.provisional,
     };
+    const stick = stickingPoint(v, p, s, e, sgn, fs);
+    if (stick) { rep.stickAt = stick.at; rep.stickDip = stick.dip; }
     if (opts.loadKg > 0) { rep.meanPower = sumP / cnt; rep.peakPower = peakP; }
     return rep;
   });
   return { reps, M, v, p };
+}
+
+// ---------------------------------------------------------------- form: sticking point and bar tilt
+// Sticking point: the place in the lift where the bar slows down before speeding up again (the speed
+// curve has two humps with a dip between them). v, p: velocity and position of the window; s..e: the
+// moving part of the concentric; sgn: +1 when lifting is up.
+// Returns { at: 0..1 of the range (0 = bottom, 1 = top), dip: 0..1 share of speed lost } or null when
+// the lift is one smooth push.
+export function stickingPoint(v, p, s, e, sgn, fs) {
+  const n = e - s + 1;
+  if (n < Math.round(0.25 * fs)) return null;
+  const w = Math.max(1, Math.round(0.03 * fs));           // smooth over about 60 ms
+  const sm = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let a = 0, c = 0;
+    for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) { a += v[s + j] * sgn; c++; }
+    sm[i] = a / c;
+  }
+  // deepest valley between two peaks ("how much water the curve would hold")
+  const L = new Float64Array(n), R = new Float64Array(n);
+  let m = -Infinity; for (let i = 0; i < n; i++) { if (sm[i] > m) m = sm[i]; L[i] = m; }
+  m = -Infinity; for (let i = n - 1; i >= 0; i--) { if (sm[i] > m) m = sm[i]; R[i] = m; }
+  let best = -1, depth = 0;
+  for (let i = 1; i < n - 1; i++) { const d = Math.min(L[i], R[i]) - sm[i]; if (d > depth) { depth = d; best = i; } }
+  if (best < 0) return null;
+  const ref = Math.min(L[best], R[best]);
+  const dip = ref > 0 ? depth / ref : 0;
+  if (dip < 0.12 || depth < 0.03) return null;            // under 12% or 3 cm/s it is just a wobble
+  const rom = (p[e] - p[s]) * sgn;
+  const at = rom > 0 ? (p[s + best] - p[s]) * sgn / rom : 0.5;
+  return { at: Math.max(0, Math.min(1, at)), dip };
+}
+
+// Eigenvalues and eigenvectors of a symmetric 3x3 matrix (Jacobi), largest first.
+function eigSym3(A) {
+  const a = A.map(r => r.slice()), V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 40; sweep++) {
+    if (Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]) < 1e-15) break;
+    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) {
+      if (Math.abs(a[i][j]) < 1e-18) continue;
+      const th = (a[j][j] - a[i][i]) / (2 * a[i][j]);
+      const t = (th >= 0 ? 1 : -1) / (Math.abs(th) + Math.sqrt(th * th + 1));
+      const c = 1 / Math.sqrt(t * t + 1), sn = t * c;
+      for (let k = 0; k < 3; k++) { const x = a[k][i], y = a[k][j]; a[k][i] = c * x - sn * y; a[k][j] = sn * x + c * y; }
+      for (let k = 0; k < 3; k++) { const x = a[i][k], y = a[j][k]; a[i][k] = c * x - sn * y; a[j][k] = sn * x + c * y; }
+      for (let k = 0; k < 3; k++) { const x = V[k][i], y = V[k][j]; V[k][i] = c * x - sn * y; V[k][j] = sn * x + c * y; }
+    }
+  }
+  const idx = [0, 1, 2].sort((x, y) => a[y][y] - a[x][x]);
+  return { val: idx.map(i => a[i][i]), vec: idx.map(i => [V[0][i], V[1][i], V[2][i]]) };
+}
+
+// Bar tilt: does one end of the bar rise before the other?
+// The board cannot know which way it is mounted, so the bar's long axis is worked out from the data:
+// a level bar can only roll around its own axis, so "up" (seen from the board) sweeps out a flat fan,
+// and the bar's axis is the direction that fan is square to. Tilt is how far "up" leaves that fan.
+// Needs the bar to roll a little during the set (it does on bench and squat); if it does not, the
+// axis cannot be found and null is returned. Inside each rep the tilt is followed with the gyro only,
+// which is accurate to about 0.1 degree over a few seconds.
+// Per rep: lead = most the bar tilts during the lift compared with a straight line from its bottom to
+// its top tilt (degrees; the sign is the same end for the whole set, but which end is unknown);
+// shift = tilt at the top minus tilt at the bottom.
+export function barTilt(F, a, b, reps, opts = {}) {
+  const fs = opts.fs || 104, dt = 1 / fs;
+  if (!reps || reps.length < 2) return null;
+  if (median(reps.map(r => r.rotDeg)) > 30) return null;   // turning this much means a wrist, not a bar
+  const o0 = Math.max(0, a - F.base), o1 = Math.min(F.n, b - F.base);
+  if (o1 - o0 < fs) return null;
+  const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = o0; i < o1; i++) {
+    const u = [F.ux[i], F.uy[i], F.uz[i]];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) M[r][c] += u[r] * u[c];
+  }
+  const n = o1 - o0;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) M[r][c] /= n;
+  const eg = eigSym3(M);
+  // around the mean "up" direction: val[1] = spread along the fan (roll), val[2] = spread out of it (tilt)
+  const roll = Math.sqrt(Math.max(0, eg.val[1])) / D2R, out = Math.sqrt(Math.max(0, eg.val[2])) / D2R;
+  if (roll < (opts.minRollDeg ?? 2.5) || eg.val[1] < 5 * eg.val[2]) return null;
+  const ax = eg.vec[2];
+  const res = [];
+  for (const rep of reps) {
+    const i0 = rep.start - F.base, i1 = Math.min(F.n - 1, (rep.top ?? rep.end) - F.base);
+    if (i0 < 0 || i1 - i0 < 4) { res.push(null); continue; }
+    let u = [F.ux[i0], F.uy[i0], F.uz[i0]];
+    const tl = new Float64Array(i1 - i0 + 1);
+    for (let i = i0; i <= i1; i++) {
+      if (i > i0) {
+        // "up" is fixed in the room, so seen from the turning board it moves by u x w
+        const wx = F.wx[i], wy = F.wy[i], wz = F.wz[i];
+        const nx = u[0] + (u[1] * wz - u[2] * wy) * dt, ny = u[1] + (u[2] * wx - u[0] * wz) * dt, nz = u[2] + (u[0] * wy - u[1] * wx) * dt;
+        const m = Math.hypot(nx, ny, nz) || 1;
+        u = [nx / m, ny / m, nz / m];
+      }
+      tl[i - i0] = Math.asin(Math.max(-1, Math.min(1, u[0] * ax[0] + u[1] * ax[1] + u[2] * ax[2]))) / D2R;
+    }
+    const last = tl.length - 1, shift = tl[last] - tl[0];
+    let lead = 0;
+    for (let k = 0; k <= last; k++) { const d = tl[k] - (tl[0] + shift * k / last); if (Math.abs(d) > Math.abs(lead)) lead = d; }
+    res.push({ lead, shift });
+  }
+  return { axis: ax, rollDeg: roll, outDeg: out, reps: res };
 }
 
 // ---------------------------------------------------------------- set summary and estimates
@@ -512,6 +616,19 @@ export function summarizeSet(reps, { exercise, loadKg, mvt } = {}) {
   // Consistency score 0-100: steady range of motion and steady tempo
   const conCv = (() => { const m = s.meanConDur; if (!m) return 0; return Math.sqrt(mean(reps.map(r => (r.conDur - m) ** 2))) / m; })();
   s.consistency = Math.round(100 * Math.max(0, 1 - 1.5 * s.romCv - 0.5 * Math.max(0, conCv - 0.15)));
+  // Sticking point: reported when at least a third of the reps (and at least two) slow down mid-lift.
+  const st = reps.filter(r => Number.isFinite(r.stickAt));
+  s.stickShare = reps.length ? st.length / reps.length : 0;
+  if (st.length >= 2 && s.stickShare >= 1 / 3) { s.stickAt = median(st.map(r => r.stickAt)); s.stickDip = median(st.map(r => r.stickDip)); }
+  // Bar tilt (reps carry tilt / tiltTop when the bar's axis could be found, see barTilt).
+  const tl = reps.filter(r => Number.isFinite(r.tilt));
+  if (tl.length >= 2) {
+    const md = median(tl.map(r => r.tilt)), dir = md >= 0 ? 1 : -1;
+    s.tiltLead = median(tl.map(r => Math.abs(r.tilt)));         // degrees, typical size
+    const clear = tl.filter(r => Math.abs(r.tilt) >= 0.7);      // reps where the tilt is big enough to have a side
+    s.tiltSame = clear.length ? clear.filter(r => r.tilt * dir > 0).length / clear.length : 0;
+    s.tiltShift = Math.abs(median(tl.map(r => r.tiltTop || 0)));
+  }
   return s;
 }
 
@@ -785,6 +902,12 @@ export class Session {
     // the bar being racked. Drop it.
     while (reps.length > 3 && this._isRack(reps[reps.length - 1], reps.slice(0, -1))) reps.pop();
     reps = reps.map((x, k) => ({ ...x, n: k + 1, provisional: false }));
+    // Bar tilt, for bar lifts only (a dumbbell, cable or machine has no bar to tilt).
+    const kind = profileFor(S.exercise).kind;
+    if (!['isolation', 'pull-down', 'pull-up'].includes(kind) && !/dumbbell|\bdb\b|kettlebell|cable|machine|smith/i.test(S.exercise)) {
+      const tilt = barTilt(this.F, S.winStart, end, reps, { fs });
+      if (tilt) reps = reps.map((x, k) => (tilt.reps[k] ? { ...x, tilt: tilt.reps[k].lead, tiltTop: tilt.reps[k].shift } : x));
+    }
     const set = {
       id: S.id, exercise: S.exercise, loadKg: S.loadKg, startedAt: S.startedAt,
       endedAt: S.startedAt + (reps.length ? (reps[reps.length - 1].top - reps[0].start) / fs * 1000 : 0),
