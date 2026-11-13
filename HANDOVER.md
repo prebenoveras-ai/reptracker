@@ -1,4 +1,17 @@
-# RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13)
+# RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13, first real VitaBrief workout 2026-11-13)
+
+## First real workout in VitaBrief (2026-11-13): what went wrong and what changed
+
+The user did a full session (dumbbell bench, cable fly, lever shoulder press, lateral raise, incline curl) and reported: first reps missing on machine-mounted sets (7 of 9, 11 of 12), made-up reps at the start of wrist sets ("it showed 3 on my first rep"), extra reps when putting the weights down, and reps in reserve far too generous.
+
+**Found and fixed: the gyro offset.** VitaBrief starts a fresh engine for every set, and a fresh engine has to learn the gyro's offset (about 1 / -3.5 / -1 deg/s on this board) from one still second. During the countdown people get into position instead of holding still, so the engine either learned it late (it then throws away everything before that moment: missing first reps) or ran the first seconds with the wrong idea of "up" (made-up reps). Replaying the 21 real recordings from 2026-11-12 with no still lead-in: 2 of 21 exact with a fresh engine, 15 of 21 when it starts from an offset learned earlier. The engine now takes `opts.seed` and exposes `session.learned`; VitaBrief keeps the last 7 learned offsets (`vb_reptracker_bias_v1`) and starts every engine from their middle value.
+
+**Changed, but only on reasoning (no recording of it exists yet):**
+- Put-down and pick-up counted as reps: `_edgeTrim` drops the first or last rep of a finished set when it is both out of rhythm and shaped differently. Cautious on purpose; it changed nothing on the 21 real sets.
+- Reps in reserve: now the lower of two estimates (slow-down inside the set, and the old 1RM-speed trend), and at most 1 after a grinding last rep. It can no longer be more generous than before, and it now also works for dumbbells and machines. It is still not calibrated to this lifter.
+
+**The tool that makes the next round exact: raw recordings in VitaBrief (v10.53).** Every recorded set is saved raw on the phone, from the start of the countdown to 4 s after logging (last 80 sets). RepTracker sheet -> "Share recordings" writes one JSON file with, per set, the sensor's count and the reps left in the workout log (the user's corrected number), RPE, and the raw data. Replay it with `node tools/real.mjs <file> --verbose` (also reads the RepTracker page's CSV). **Ask for this file after the next workout before changing the counting again.**
+
 
 ## Form, strength readiness and all-day mode (2026-11-13)
 

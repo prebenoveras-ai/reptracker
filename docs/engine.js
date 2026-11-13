@@ -97,7 +97,12 @@ function solve(A, b) {
 
 // ---------------------------------------------------------------- per-sample preprocessing
 export class Preprocessor {
-  constructor(fs = 104, calib = null) {
+  // seed: { gyroBias: [3] deg/s, g0 } learned earlier on the same board (see Session.learned).
+  // The gyro's offset belongs to the board, not to the set, so a new session can start with it
+  // instead of waiting for a still second. That matters when the lifter is already moving when the
+  // session starts: without it the first seconds are measured with the wrong idea of "up", which
+  // shows as made-up reps at the start, or real first reps being thrown away.
+  constructor(fs = 104, calib = null, seed = null) {
     this.fs = fs; this.dt = 1 / fs;
     this.calib = calib;            // { offset:[3], scale:[3] } from fitCalibration
     this.q = null;
@@ -112,6 +117,13 @@ export class Preprocessor {
     this.count = 0;
     this.calibratedAt = -1;        // sample count when the gyro bias was first known
     if (calib && calib.gyroBias) { this.bias = calib.gyroBias.slice(); this.calibrated = true; this.calibratedAt = 0; }
+    this.seeded = false;           // running on a remembered offset, not yet confirmed by a still second
+    this.learned = false;          // the offset has been measured during a real still second in this session
+    if (seed && Array.isArray(seed.gyroBias) && seed.gyroBias.length === 3 && seed.gyroBias.every(Number.isFinite)) {
+      this.bias = seed.gyroBias.slice();
+      if (Number.isFinite(seed.g0) && seed.g0 > 0.9 && seed.g0 < 1.1) this.g0 = seed.g0;
+      this.calibrated = true; this.calibratedAt = 0; this.seeded = true;
+    }
   }
 
   _setCalibrated(gm, m, reinit = true) {
@@ -188,14 +200,22 @@ export class Preprocessor {
       let gsd = 0; for (let i = 0; i < this.win; i++) for (let j = 0; j < 3; j++) gsd += (this.ringRaw[i * 6 + 3 + j] - gm[j]) ** 2;
       gsd = Math.sqrt(gsd / this.win);
       // Still = steady readings AND the total equals gravity (a steady push up or down is not still).
-      const gyroQuiet = this.calibrated ? (mw < 2 && maxW < 5) : (gsd < 1 && Math.hypot(...gm) < 15);
-      const gravOk = this.calibrated ? Math.abs(m - this.g0) < 0.012 : Math.abs(m - 1) < 0.08;
+      // While running on a remembered offset, also accept the test that needs no offset at all, so a
+      // remembered value that has gone stale cannot stop the board from ever looking still again.
+      const raw = !this.calibrated || this.seeded;
+      const gyroQuiet = (this.calibrated && mw < 2 && maxW < 5) || (raw && gsd < 1 && Math.hypot(...gm) < 15);
+      const gravOk = (this.calibrated && Math.abs(m - this.g0) < 0.012) || (raw && Math.abs(m - 1) < 0.08);
       still = sd < 0.008 && gyroQuiet && gravOk;
       this.stillRun = still ? (this.stillRun || 0) + 1 : 0;
       // learn gyro bias and gravity scale only once settled for a full second
       if (still && this.stillRun >= this.fs) {
-        if (!this.calibrated) this._setCalibrated(gm, m);
-        else {
+        if (!this.calibrated || this.seeded) {
+          const at = this.calibratedAt;
+          this._setCalibrated(gm, m);
+          if (this.seeded) { this.seeded = false; this.calibratedAt = at; }   // data before this is still usable
+          this.learned = true;
+        } else {
+          this.learned = true;
           const r = 0.01;
           for (let j = 0; j < 3; j++) this.bias[j] += r * (gm[j] - this.bias[j]);
           this.g0 += r * (m - this.g0);
@@ -632,17 +652,38 @@ export function summarizeSet(reps, { exercise, loadKg, mvt } = {}) {
   return s;
 }
 
-// Reps left before velocity reaches the 1RM velocity (linear trend over the last reps).
+// Reps in reserve: how many more reps the set had in it. Two estimates, the lower one wins
+// (the first real workouts showed the old estimate was far too generous).
+//  1. Slow-down inside the set. How much slower the last rep is than the fastest tells how much of the
+//     set's possible reps are done: about half at 20% slower, two thirds at 30%, four fifths at 40%,
+//     nearly all at 50% (published averages for presses and squats; it needs no 1RM speed, so it
+//     also works for dumbbells, machines and isolation lifts).
+//  2. For barbell lifts with a known 1RM speed: reps left before the trend reaches that speed.
+// A last rep that is a quarter slower than the one before it is a grind: at most one rep left.
+const RIR_DONE = [[0, 0.20], [0.10, 0.35], [0.20, 0.50], [0.30, 0.66], [0.40, 0.80], [0.50, 0.92], [0.60, 1.0]];
 export function estimateRir(mcvs, mvt) {
-  if (!mvt || mcvs.length < 3) return null;
-  const tail = mcvs.slice(-5);
-  const n = tail.length, xs = tail.map((_, i) => i), mx = mean(xs), my = mean(tail);
-  let num = 0, den = 0; for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (tail[i] - my); den += (xs[i] - mx) ** 2; }
-  const slope = den ? num / den : 0;
-  const lastFit = my + slope * (n - 1 - mx);
-  if (lastFit <= mvt) return { value: 0, text: '0' };
-  if (slope >= -0.005) return { value: 6, text: '5+' };
-  const r = (lastFit - mvt) / -slope;
+  const n = mcvs.length;
+  if (n < 3) return null;
+  const best = Math.max(...mcvs.slice(0, 3));
+  if (!(best > 0)) return null;
+  // the last rep, leaning toward the slower of the last two so one lucky rep does not hide fatigue
+  const lastV = (mcvs[n - 1] + Math.min(mcvs[n - 1], mcvs[n - 2])) / 2;
+  const vl = Math.max(0, Math.min(0.6, 1 - lastV / best));
+  let done = 1;
+  for (let k = 1; k < RIR_DONE.length; k++) {
+    if (vl <= RIR_DONE[k][0]) { const [x0, y0] = RIR_DONE[k - 1], [x1, y1] = RIR_DONE[k]; done = y0 + (y1 - y0) * (vl - x0) / (x1 - x0); break; }
+  }
+  let r = n * (1 - done) / done;
+  if (mvt) {
+    const tail = mcvs.slice(-5);
+    const m = tail.length, xs = tail.map((_, i) => i), mx = mean(xs), my = mean(tail);
+    let num = 0, den = 0; for (let i = 0; i < m; i++) { num += (xs[i] - mx) * (tail[i] - my); den += (xs[i] - mx) ** 2; }
+    const slope = den ? num / den : 0;
+    const lastFit = my + slope * (m - 1 - mx);
+    if (lastFit <= mvt) r = 0;
+    else if (slope < -0.005) r = Math.min(r, (lastFit - mvt) / -slope);
+  }
+  if (mcvs[n - 1] < 0.75 * mcvs[n - 2]) r = Math.min(r, 1);
   return r > 5 ? { value: 6, text: '5+' } : { value: Math.round(r), text: String(Math.round(r)) };
 }
 
@@ -693,7 +734,7 @@ export function classify(features, library, k = 3) {
 export class Session {
   constructor(opts = {}) {
     this.fs = opts.fs || 104;
-    this.pre = new Preprocessor(this.fs, opts.calib || null);
+    this.pre = new Preprocessor(this.fs, opts.calib || null, opts.seed || null);
     this.F = new Frames(8192);
     this.longStillBefore = false;
     this.fr = {};
@@ -716,6 +757,9 @@ export class Session {
   }
 
   setExercise(name, loadKg) { this.exercise = name || ''; this.loadKg = Number(loadKg) || 0; }
+  // The board's gyro offset and gravity size, once measured during a real still second (else null).
+  // Hand it to the next Session as opts.seed.
+  get learned() { return this.pre.learned ? { gyroBias: this.pre.bias.slice(), g0: this.pre.g0 } : null; }
   setArmed(on) { this.armed = !!on; }
   get profile() { return profileFor(this.exercise); }
   get now() { return this.F.end; }
@@ -778,6 +822,27 @@ export class Session {
     if (list.length < 3) return false;
     const mr = median(list.map(r => r.rom)), mt = median(list.map(r => r.rotDeg));
     return x.rom > 1.3 * mr && x.rotDeg > 1.5 * mt + 5;
+  }
+
+  // Picking the weights up before the first rep and putting them down after the last one can look
+  // like a rep. With the whole set known, the first and the last "rep" are dropped when they are
+  // both out of rhythm (much longer from their neighbour than the reps are from each other) and
+  // shaped differently (range, or how much the wrist turns). Either alone is not enough: a last
+  // rep after a breather is still a rep, and so is a short one in rhythm.
+  _edgeTrim(reps) {
+    const fs = this.fs;
+    for (let guard = 0; guard < 4 && reps.length >= 5; guard++) {
+      const core = reps.slice(1, -1);
+      const gaps = []; for (let k = 1; k < core.length; k++) gaps.push(core[k].top - core[k - 1].top);
+      const mg = median(gaps), mr = median(core.map(x => x.rom)), mt = median(core.map(x => x.rotDeg));
+      const late = g => g > 1.8 * mg && g > mg + fs;
+      const odd = x => x.rom > 1.5 * mr || x.rom < 0.6 * mr || (mt >= 40 && (x.rotDeg > 1.5 * mt || x.rotDeg < 0.6 * mt));
+      const first = reps[0], last = reps[reps.length - 1];
+      if (late(reps[1].top - first.top) && odd(first)) { reps = reps.slice(1); continue; }
+      if (late(last.top - reps[reps.length - 2].top) && odd(last)) { reps = reps.slice(0, -1); continue; }
+      break;
+    }
+    return reps;
   }
 
   // Keep the reps that belong together by rhythm; returns the newest group.
@@ -901,6 +966,7 @@ export class Session {
     // A rep is first judged on provisional numbers; with the final numbers a trailing rep can turn out to be
     // the bar being racked. Drop it.
     while (reps.length > 3 && this._isRack(reps[reps.length - 1], reps.slice(0, -1))) reps.pop();
+    reps = this._edgeTrim(reps);
     reps = reps.map((x, k) => ({ ...x, n: k + 1, provisional: false }));
     // Bar tilt, for bar lifts only (a dumbbell, cable or machine has no bar to tilt).
     const kind = profileFor(S.exercise).kind;

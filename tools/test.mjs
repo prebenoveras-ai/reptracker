@@ -89,5 +89,30 @@ const ok = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!
   ok(q.recs.every(x => (x[2] & 0x80) !== 0 && decodeAngle(x[1]) > 80), 'still board: USB flag set and angle reads flat on its back');
 }
 
+// 8. remembered gyro offset: a session that starts while the weight is already moving
+{
+  const sim = makeSession(1505, 'squat');
+  const calib = fitCalibration(sim.calibPoints);
+  // learn the board's offset from the whole session (it has still moments)
+  const full = analyzeRecording(sim.samples, { fs: FS, exercise: 'back squat', indices: sim.indices, calib });
+  const seed = full.session.learned;
+  ok(seed && seed.gyroBias.every(Number.isFinite), `offset learned during a still second (${seed && seed.gyroBias.map(x => x.toFixed(1)).join(', ')} deg/s)`);
+  // now start listening just as the first rep of the first set begins: no still second before it
+  const t = sim.sets[0], from = sim.indices.findIndex(i => i >= t.reps[0].conStartIdx - Math.round(2.0 * FS));
+  const cut = sim.samples.slice(from), idx = sim.indices.slice(from);
+  const fresh = analyzeRecording(cut, { fs: FS, exercise: 'back squat', indices: idx, calib }).sets[0];
+  const seeded = analyzeRecording(cut, { fs: FS, exercise: 'back squat', indices: idx, calib, seed }).sets[0];
+  ok(seeded && seeded.reps.length === t.reps.length, `started mid-movement with the offset remembered: ${seeded && seeded.reps.length} reps of ${t.reps.length} (without it: ${fresh ? fresh.reps.length : 0})`);
+  const stale = analyzeRecording(sim.samples, { fs: FS, exercise: 'back squat', indices: sim.indices, calib, seed: { gyroBias: [40, -40, 40], g0: 1 } });
+  ok(stale.sets.length === sim.sets.length && stale.session.learned && Math.abs(stale.session.learned.gyroBias[0] - seed.gyroBias[0]) < 0.5, 'a remembered offset that is badly wrong is replaced at the first still second');
+}
+
+// 9. reps in reserve: the more a set slows down, the fewer are left; never generous on a grind
+{
+  const easy = estimateRir([0.60, 0.61, 0.59, 0.60, 0.58], null), mid = estimateRir([0.60, 0.58, 0.54, 0.50, 0.45, 0.42], null), hard = estimateRir([0.60, 0.57, 0.50, 0.44, 0.38, 0.31], null);
+  ok(easy.value >= 5 && mid.value >= 2 && mid.value <= 4 && hard.value <= 1, `slow-down alone (no 1RM speed): easy ${easy.text}, medium ${mid.text}, hard ${hard.text}`);
+  ok(estimateRir([0.5, 0.5, 0.49, 0.48, 0.34], null).value <= 1, 'a last rep that suddenly grinds leaves at most one');
+}
+
 console.log(fail ?`\n${fail} check(s) failed` : '\nall checks passed');
 process.exit(fail ? 1 : 0);
