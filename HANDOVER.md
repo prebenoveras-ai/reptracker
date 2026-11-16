@@ -1,4 +1,19 @@
-# RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13, first real VitaBrief workout 2026-11-13)
+# RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13, first real VitaBrief workout 2026-11-13, counting fixes from the 2026-11-16 workout)
+
+## Second real workout (2026-11-16, VitaBrief 10.58, board on the wrist, every set started by taps)
+
+22 recorded sets (`G:\My Drive\reptracker_vitabrief_20261116-2118.json`): bench up to 96 kg and a single at 80, dumbbell incline press, lever seated fly, lever seated row, wide neutral-grip pulldown. Replaying them gave the same counts as the phone, so nothing was lost over Bluetooth; only 9 of 22 were right. Causes and fixes (engine, copied into VitaBrief 10.59):
+
+| Cause | Fix |
+|---|---|
+| Reps were counted on vertical movement only. Seated rows move 65-75 cm forwards and back but 10 cm up and down; the fly machine 5 cm. | Profile `axis`: rows (and face pulls) count along the main direction the hand moves (`mainAxis`), flys on how far the wrist turns (`mainTurnAxis`, about 120 deg a rep, as distance on a 0.4 m arc). The concentric is the first move away from the start. Rows 6/4/7/3 -> 11/11/9/8 (real 12/10/7/8), flys 0/0 -> 8/8. |
+| The window started 5 s before GO (taps, gripping the bar, kicking dumbbells up), and with tap starts there is never a still moment, so a one-rep set could never count. | `session.goAt` (set by `setArmed(true)`, i.e. GO): nothing before it is analysed, and GO itself replaces the still-moment rule for one-rep and short sets. The 80 kg single now counts; pull-downs keep their first rep. |
+| Lifting the bench bar off the hooks (22-24 cm up, 0.08 m/s, before any lowering) counted as a rep. | Profile `eccFirst` (barbell bench and squat, not dumbbell press): a move up only counts after a lowering of at least a quarter of its size. |
+| A slow, grinding last rep looked bigger and twistier and was thrown away as "racking the bar", or the set closed before it was measured. | `_isRack` no longer applies to bench/squat (the unracking rule covers that) or dumbbells; overdue sets wait up to 4 s for a still moment and then take a late look at the whole set; `_judge` uses the recent rhythm (last 3 gaps), so a slowing set does not end early. |
+| Picking dumbbells up and putting them down (wrist turns 100-160 deg against 30) counted. | A move that turns the wrist more than max(3x, +60 deg) of the reps is dropped at either end, in rhythm or not, and rejected live. |
+| A pull-down rep that stalled halfway was split into two halves that were both too small. | The pause split only happens when one part is a full move by itself; reps are judged on the whole swing when the moving part is a fair share of it; a rep still in progress is not rejected for good. |
+
+Result: 18 of 22 exact (was 9), the 2026-11-12 CSV 17 of 21 (was 16), simulator counts the same or better (squat 92 -> 96% exact, false sets 25 -> 23) except one curl set that went from off by one to off by two. Still wrong: a 4 s grinder on bench set 7 that ran straight into racking, with no turnaround to see (12 of 13); rows within 1-2 (and the user was not sure of every real count). VitaBrief test `tests/repTracker.test.js` replays six of these sets (`tests/reptracker-sets.json`). Counts on these sets do not depend on when Done is pressed once the set is over (checked every 2 s from 20 s on).
 
 ## First real workout in VitaBrief (2026-11-13): what went wrong and what changed
 

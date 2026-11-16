@@ -21,21 +21,30 @@ const D2R = Math.PI / 180;
 // concentric: which way the sensor moves during the lifting (hard) phase.
 // mvt: typical mean velocity at a 1-rep max (m/s), approximate published averages for barbell lifts.
 //      Used to estimate reps in reserve and 1RM. null = no reliable value (isolation lifts).
+// axis: 'z' = reps are counted on the up-and-down movement; 'auto' = on the main direction the hand moves
+//      (seated rows move 65-75 cm forwards and back but only 10 cm up and down); 'turn' = on how far the
+//      wrist turns (flys: about 120 deg a rep, on an arc). For 'auto' and 'turn' the concentric is the
+//      first move away from where the set starts (the stretched position).
+// eccFirst: the lift starts at the top and goes down first (bench, squat). A move up that has no
+//      lowering before it (lifting the bar off the hooks) is not a rep.
 const PROFILES = [
-  { re: /pull.?down|push.?down|triceps?.*(cable|rope)|straight.?arm|face.?pull/i, concentric: 'down', mvt: null, name: 'pull-down' },
+  { re: /face.?pull/i, concentric: 'up', mvt: null, name: 'row', axis: 'auto' },
+  { re: /pull.?down|push.?down|triceps?.*(cable|rope)|straight.?arm/i, concentric: 'down', mvt: null, name: 'pull-down' },
   { re: /pull.?up|chin.?up/i, concentric: 'up', mvt: 0.23, name: 'pull-up' },
   { re: /dead|rdl|romanian|stiff|good.?morning|rack pull/i, concentric: 'up', mvt: 0.17, name: 'deadlift' },
   { re: /hip thrust|glute bridge/i, concentric: 'up', mvt: 0.25, name: 'hip thrust' },
-  { re: /bench|floor press|dip|push.?up/i, concentric: 'up', mvt: 0.17, name: 'bench' },
-  { re: /squat|lunge|split|leg press|hack|step.?up/i, concentric: 'up', mvt: 0.30, name: 'squat' },
+  { re: /fly|flye|pec.?deck|rear.?delt|reverse.?fly/i, concentric: 'up', mvt: null, name: 'fly', axis: 'turn' },
+  { re: /bench|floor press|dip|push.?up/i, concentric: 'up', mvt: 0.17, name: 'bench', eccFirst: true },
+  { re: /squat|lunge|split|leg press|hack|step.?up/i, concentric: 'up', mvt: 0.30, name: 'squat', eccFirst: true },
   { re: /overhead|ohp|military|shoulder press|push press|arnold/i, concentric: 'up', mvt: 0.19, name: 'overhead press' },
-  { re: /row/i, concentric: 'up', mvt: 0.45, name: 'row' },
-  { re: /curl|raise|fly|flye|extension|kickback|shrug|calf/i, concentric: 'up', mvt: null, name: 'isolation' },
+  { re: /row/i, concentric: 'up', mvt: 0.45, name: 'row', axis: 'auto' },
+  { re: /curl|raise|extension|kickback|shrug|calf/i, concentric: 'up', mvt: null, name: 'isolation' },
 ];
 export function profileFor(exercise) {
   const ex = String(exercise || '');
-  for (const p of PROFILES) if (p.re.test(ex)) return { concentric: p.concentric, mvt: p.mvt, kind: p.name };
-  return { concentric: 'up', mvt: null, kind: 'generic' };
+  // (a dumbbell press is kicked up to the bottom position and pressed from there: no lowering first)
+  for (const p of PROFILES) if (p.re.test(ex)) return { concentric: p.concentric, mvt: p.mvt, kind: p.name, axis: p.axis || 'z', eccFirst: !!p.eccFirst && !(p.name === 'bench' && /dumbbell|\bdb\b|kettlebell/i.test(ex)) };
+  return { concentric: 'up', mvt: null, kind: 'generic', axis: 'z', eccFirst: false };
 }
 
 // Velocity zones commonly used in velocity-based training (mean concentric velocity, m/s).
@@ -325,14 +334,59 @@ const nearestStart = (reps, start, tol) => { let b = null, d = tol; for (const r
 const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 
+// The direction the hand moves most (unit vector in room coordinates), signed so that the first clear
+// move away from where the window starts is positive. Used for rows and flys, which move mostly
+// forwards and back. null when there is not enough movement to tell.
+function mainAxis(lx, ly, lz, stillIdx, fs) {
+  const n = lz.length, dt = 1 / fs, w = Math.round(3 * fs);
+  if (n < 2 * fs) return null;
+  const raw = [lx, ly, lz].map(l => detrend(cumsum(l, dt), stillIdx));
+  const vs = raw.map(v => { const hp = movingAvg(v, w); return v.map((x, i) => x - hp[i]); });
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) for (let r = 0; r < 3; r++) for (let c = r; c < 3; c++) C[r][c] += vs[r][i] * vs[c][i];
+  C[1][0] = C[0][1]; C[2][0] = C[0][2]; C[2][1] = C[1][2];
+  const e = eigSym3(C).vec[0];
+  // Which way is first: from the velocity without the high-pass (a fast first pull would leak backwards in
+  // time through the 3 s average and flip the sign). Over the first second drift is small.
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    p += (raw[0][i] * e[0] + raw[1][i] * e[1] + raw[2][i] * e[2]) * dt;
+    if (Math.abs(p) >= 0.06) return e.map(x => x * Math.sign(p));
+  }
+  return null;
+}
+
+// The axis the wrist turns around most (board coordinates), signed so the first clear turn is positive.
+// Flys swing the hand on an arc: the turn (about 120 deg per rep) is a far cleaner signal than position.
+function mainTurnAxis(wx, wy, wz, fs) {
+  const n = wx.length, dt = 1 / fs;
+  if (n < 2 * fs) return null;
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], w = [wx, wy, wz];
+  for (let i = 0; i < n; i++) for (let r = 0; r < 3; r++) for (let c = r; c < 3; c++) C[r][c] += w[r][i] * w[c][i];
+  C[1][0] = C[0][1]; C[2][0] = C[0][2]; C[2][1] = C[1][2];
+  const e = eigSym3(C).vec[0];
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    a += (wx[i] * e[0] + wy[i] * e[1] + wz[i] * e[2]) * dt;
+    if (Math.abs(a) >= 15 * D2R) return e.map(x => x * Math.sign(a));
+  }
+  return null;
+}
+// Turning is measured as the distance the hand travels on its arc, so the usual thresholds (metres) apply.
+const TURN_RADIUS = 0.4;
+
 // ---------------------------------------------------------------- window analysis
-// Analyse frames[a..b) (absolute indices). opts: { fs, concentric, final, loadKg }
-// Returns { reps, M, v, p } where reps are completed reps with metrics.
+// Analyse frames[a..b) (absolute indices). opts: { fs, concentric, final, loadKg, axis, axisVec, eccFirst }
+//   axis 'auto': count along the main direction of movement (axisVec reuses one found earlier)
+//   axis 'turn': count on how far the wrist turns (flys), as distance on an arc of TURN_RADIUS
+//   eccFirst: a lift only counts when the weight was lowered before it (no unracking reps)
+// Returns { reps, M, v, p, axis } where reps are completed reps with metrics.
 export function analyzeWindow(F, a, b, opts) {
   const fs = opts.fs || 104, dt = 1 / fs;
   const o0 = a - F.base, n = b - a;
   if (n < fs) return { reps: [], M: 0 };
-  const lz = F.lz.subarray(o0, o0 + n), lx = F.lx.subarray(o0, o0 + n), ly = F.ly.subarray(o0, o0 + n);
+  let lz = F.lz.subarray(o0, o0 + n);
+  const lx = F.lx.subarray(o0, o0 + n), ly = F.ly.subarray(o0, o0 + n);
   // Only long still periods (racked bar, rest) count as "velocity is zero": a slow, smooth eccentric
   // can look still to a short window, and zeroing it would erase the movement.
   const stillRaw = F.still.subarray(o0, o0 + n), still = new Uint8Array(n);
@@ -344,7 +398,18 @@ export function analyzeWindow(F, a, b, opts) {
     i = j;
   }
   const stillIdx = []; for (let i = 0; i < n; i++) if (still[i]) stillIdx.push(i);
-  const vzRaw = cumsum(lz, dt), vxRaw = cumsum(lx, dt), vyRaw = cumsum(ly, dt);
+  let axis = null;
+  if (opts.axis === 'auto') {
+    axis = opts.axisVec || mainAxis(lx, ly, lz, stillIdx, fs);
+    if (axis) { const m = new Float64Array(n); for (let i = 0; i < n; i++) m[i] = lx[i] * axis[0] + ly[i] * axis[1] + lz[i] * axis[2]; lz = m; }
+  }
+  let vzRaw = cumsum(lz, dt);
+  if (opts.axis === 'turn') {
+    const wx = F.wx.subarray(o0, o0 + n), wy = F.wy.subarray(o0, o0 + n), wz = F.wz.subarray(o0, o0 + n);
+    axis = opts.axisVec || mainTurnAxis(wx, wy, wz, fs);
+    if (axis) { vzRaw = new Float64Array(n); for (let i = 0; i < n; i++) vzRaw[i] = (wx[i] * axis[0] + wy[i] * axis[1] + wz[i] * axis[2]) * TURN_RADIUS; }
+  }
+  const vxRaw = cumsum(lx, dt), vyRaw = cumsum(ly, dt);
 
   // pass 1: drift removed at long still periods. Without any (continuous wrist motion),
   // fall back to a slow high-pass just to locate the turnarounds roughly.
@@ -371,7 +436,7 @@ export function analyzeWindow(F, a, b, opts) {
     thr = Math.max(0.05, 0.4 * M);
     ext = extrema(p, thr).ext;
   }
-  if (!M) return { reps: [], M: 0 };
+  if (!M) return { reps: [], M: 0, axis };
   const res = extrema(p, thr);
   ext = res.ext.slice();
 
@@ -400,7 +465,9 @@ export function analyzeWindow(F, a, b, opts) {
       for (let i = a0 + 1; i < b0; i++) {
         if (Math.abs(v[i]) < 0.04) { if (s < 0) s = i; }
         else if (s >= 0) {
-          if (i - s >= pauseLen && Math.abs(p[s] - p[a0]) >= 0.5 * thr && Math.abs(p[b0] - p[i]) >= 0.5 * thr) {
+          // (a rep that stalls halfway and then finishes is one rep: split only when one part is a full move)
+          const d1 = Math.abs(p[s] - p[a0]), d2 = Math.abs(p[b0] - p[i]);
+          if (i - s >= pauseLen && d1 >= 0.5 * thr && d2 >= 0.5 * thr && Math.max(d1, d2) >= 0.7 * M) {
             out.push({ i: s, t: dir }, { i: i - 1, t: -dir });
           }
           s = -1;
@@ -424,24 +491,31 @@ export function analyzeWindow(F, a, b, opts) {
     const e0 = ext[k - 1], e1 = ext[k];
     const amp = (p[e1.i] - p[e0.i]) * sgn;
     if (amp <= 0) continue;
+    if (opts.eccFirst) {
+      // bench, squat: the bar comes down before it goes up. Lifting it off the hooks has no lowering before it.
+      // (The first lowering of a set often measures short: drift is only removed at the turnarounds.)
+      const eb = ext[k - 2], down = eb ? (p[eb.i] - p[e0.i]) * sgn : 0;
+      if (down < 0.25 * amp) continue;
+    }
     let rot = 0;
     for (let i = e0.i; i <= e1.i; i++) { const j = o0 + i; rot += Math.hypot(F.wx[j], F.wy[j], F.wz[j]) * dt; }
     cand.push({ k, i0: e0.i, i1: e1.i, amp, rot: rot / D2R, provisional: !!e1.provisional });
   }
-  if (!cand.length) return { reps: [], M, v, p };
+  if (!cand.length) return { reps: [], M, v, p, axis };
   // consistency: drop set-up moves at the edges (picking the weight up, walking it out) and tiny wiggles
   const Mc = median(cand.map(c => c.amp));
   let keep = cand.filter(c => c.amp >= 0.45 * Mc);
   if (keep.length >= 3) {
     const m2 = median(keep.map(c => c.amp)), r2 = median(keep.map(c => c.rot));
     // For wrist work every real rep turns the forearm; a pick-up or set-down barely does.
-    const odd = c => c.amp > 1.6 * m2 || c.amp < 0.5 * m2 || (r2 > 40 && (c.rot < 0.45 * r2 || c.rot > 2 * r2));
+    // Picking dumbbells up or putting them down turns the wrist far more than a press does (100-160 deg against 30).
+    const odd = c => c.amp > 1.6 * m2 || c.amp < 0.5 * m2 || (r2 > 40 && (c.rot < 0.45 * r2 || c.rot > 2 * r2)) || c.rot > Math.max(3 * r2, r2 + 60);
     while (keep.length >= 3 && odd(keep[0])) keep.shift();
     while (keep.length >= 3 && odd(keep[keep.length - 1])) keep.pop();
   }
   keep = keep.filter(c => { const d = (c.i1 - c.i0) / fs; return d >= 0.15 && d <= 8; });
 
-  const firstDown = ext.length && ext[0].t === (up ? 1 : -1);   // set starts with the eccentric
+  const firstDown = !!opts.eccFirst || (ext.length && ext[0].t === (up ? 1 : -1));   // set starts with the eccentric
   const vmin = 0.03;
   const reps = keep.map((c, idx) => {
     // The lift itself: grow outwards from the fastest point until the bar stops. This drops pauses
@@ -481,6 +555,7 @@ export function analyzeWindow(F, a, b, opts) {
       start: a + s, end: a + e, top: a + c.i1,
       // if the moving part covers most of the swing, report the full swing (turnaround to turnaround)
       rom: romMove > 0.8 * c.amp ? c.amp : romMove,
+      swing: c.amp,   // turnaround to turnaround (a rep that stalls halfway has a short rom but a full swing)
       mcv: sumV / cnt,
       pv: peakV,
       conDur: (e - s + 1) / fs,
@@ -497,7 +572,7 @@ export function analyzeWindow(F, a, b, opts) {
     if (opts.loadKg > 0) { rep.meanPower = sumP / cnt; rep.peakPower = peakP; }
     return rep;
   });
-  return { reps, M, v, p };
+  return { reps, M, v, p, axis };
 }
 
 // ---------------------------------------------------------------- form: sticking point and bar tilt
@@ -754,15 +829,23 @@ export class Session {
     // Then a set starts after ONE clean rep instead of three, so counting begins at rep 1.
     this.armed = !!opts.armed;
     this.stillBefore = 0;
+    // Where the app said GO (absolute index), or null. Nothing before it belongs to the set: getting into
+    // position, tapping the board, kicking the dumbbells up. GO itself is also the sign that a set is coming,
+    // so after a tap start (no still moment: the lifter grips the bar straight away) one rep can still count.
+    this.goAt = null;
   }
 
   setExercise(name, loadKg) { this.exercise = name || ''; this.loadKg = Number(loadKg) || 0; }
   // The board's gyro offset and gravity size, once measured during a real still second (else null).
   // Hand it to the next Session as opts.seed.
   get learned() { return this.pre.learned ? { gyroBias: this.pre.bias.slice(), g0: this.pre.g0 } : null; }
-  setArmed(on) { this.armed = !!on; }
+  setArmed(on) { this.armed = !!on; this.goAt = on ? this.F.end : null; }
   get profile() { return profileFor(this.exercise); }
   get now() { return this.F.end; }
+  _wopts(extra) {
+    const pr = this.profile;
+    return { fs: this.fs, concentric: pr.concentric, axis: pr.axis, eccFirst: pr.eccFirst, loadKg: this.loadKg, ...extra };
+  }
 
   // raw: [ax, ay, az, gx, gy, gz]; idx: sample index from the board (gaps get filled)
   push(raw, idx) {
@@ -804,13 +887,17 @@ export class Session {
     const prev = list[list.length - 1], gap = x.top - prev.top;
     if (list.length >= 3) {
       const gaps = []; for (let k = 1; k < list.length; k++) gaps.push(list[k].top - list[k - 1].top);
-      const mp = median(gaps);
+      const mp = median(gaps.slice(-3));   // the recent rhythm: reps slow down a lot towards failure
       if (gap > Math.max(2.0 * mp, mp + 3 * fs)) return 'end';
     } else if (gap > 9 * fs) return 'end';
     if (list.length >= 3) {
       const mr = median(list.map(r => r.rom)), mt = median(list.map(r => r.rotDeg));
-      if (x.rom > 1.6 * mr || x.rom < 0.45 * mr) return 'reject';
+      // (a rep that stalls halfway moves in two parts: judge it by its whole swing, as long as the moving
+      // part is a fair share of it, so a twitch inside a big drift does not pass)
+      const size = x.swing && x.rom >= 0.35 * x.swing ? Math.max(x.rom, x.swing) : x.rom;
+      if (x.rom > 1.6 * mr || size < 0.45 * mr) return 'reject';
       if (mt > 40 && (x.rotDeg < 0.45 * mt || x.rotDeg > 1.6 * mt)) return 'reject';
+      if (x.rotDeg > Math.max(3 * mt, mt + 60)) return 'reject';   // putting dumbbells down, not a press
       if (this._isRack(x, list)) return 'reject';
     }
     return 'ok';
@@ -820,6 +907,12 @@ export class Session {
   // (real data: 75 cm and 48 deg after eight reps of 50 cm and 23 deg).
   _isRack(x, list) {
     if (list.length < 3) return false;
+    // A slow last rep that grinds up from the chest is lowered first; a rack sweep is not. On bench and squat
+    // a move up with no lowering before it never becomes a rep (eccFirst), and the size test here threw
+    // away real grinding last reps (2026-11-16: 62 cm and 51 deg measured against 41 cm and 28 deg).
+    if (x.eccRom >= 0.6 * x.rom || this.profile.eccFirst) return false;
+    // dumbbells are not racked (putting them down turns the wrist a lot: _edgeTrim handles that)
+    if (/dumbbell|\bdb\b|kettlebell/i.test(this.exercise)) return false;
     const mr = median(list.map(r => r.rom)), mt = median(list.map(r => r.rotDeg));
     return x.rom > 1.3 * mr && x.rotDeg > 1.5 * mt + 5;
   }
@@ -831,15 +924,24 @@ export class Session {
   // rep after a breather is still a rep, and so is a short one in rhythm.
   _edgeTrim(reps) {
     const fs = this.fs;
+    // Turning the wrist far more than the reps do (picking dumbbells up, putting them down) is never a rep,
+    // in rhythm or not.
+    for (let guard = 0; guard < 4 && reps.length >= 4; guard++) {
+      const mt = median(reps.slice(1, -1).map(x => x.rotDeg)), wild = x => x.rotDeg > Math.max(3 * mt, mt + 60);
+      if (wild(reps[0])) { reps = reps.slice(1); continue; }
+      if (wild(reps[reps.length - 1])) { reps = reps.slice(0, -1); continue; }
+      break;
+    }
     for (let guard = 0; guard < 4 && reps.length >= 5; guard++) {
       const core = reps.slice(1, -1);
       const gaps = []; for (let k = 1; k < core.length; k++) gaps.push(core[k].top - core[k - 1].top);
       const mg = median(gaps), mr = median(core.map(x => x.rom)), mt = median(core.map(x => x.rotDeg));
       const late = g => g > 1.8 * mg && g > mg + fs;
-      const odd = x => x.rom > 1.5 * mr || x.rom < 0.6 * mr || (mt >= 40 && (x.rotDeg > 1.5 * mt || x.rotDeg < 0.6 * mt));
+      // A last rep that was lowered first and then ground up slowly measures long; that is a rep, not a put-down.
+      const odd = (x, last) => (x.rom > 1.5 * mr && !(last && x.eccRom >= 0.6 * x.rom)) || x.rom < 0.6 * mr || (mt >= 40 && (x.rotDeg > 1.5 * mt || x.rotDeg < 0.6 * mt));
       const first = reps[0], last = reps[reps.length - 1];
-      if (late(reps[1].top - first.top) && odd(first)) { reps = reps.slice(1); continue; }
-      if (late(last.top - reps[reps.length - 2].top) && odd(last)) { reps = reps.slice(0, -1); continue; }
+      if (late(reps[1].top - first.top) && odd(first, false)) { reps = reps.slice(1); continue; }
+      if (late(last.top - reps[reps.length - 2].top) && odd(last, true)) { reps = reps.slice(0, -1); continue; }
       break;
     }
     return reps;
@@ -861,7 +963,7 @@ export class Session {
     const fs = this.fs;
     if (this.active) {
       const S = this.active;
-      const r = analyzeWindow(this.F, S.winStart, now, { fs, concentric: this.profile.concentric, final: false, loadKg: this.loadKg });
+      const r = analyzeWindow(this.F, S.winStart, now, this._wopts({ final: false, axisVec: S.axis }));
       const reps = r.reps.filter(x => x.start >= S.firstStart - fs);
       // refresh the metrics of reps already counted (they sharpen as more data arrives)
       for (let k = 0; k < S.liveReps.length; k++) {
@@ -876,7 +978,8 @@ export class Session {
         if (S.rejected.some(t => Math.abs(t - x.start) < 0.35 * fs)) continue;
         const verdict = this._judge(S.liveReps, x);
         if (verdict === 'end') { this._finishSet(now, lastTop + Math.round(0.5 * fs)); return; }
-        if (verdict === 'reject') { S.rejected.push(x.start); continue; }
+        // a rep still in progress is judged on rough numbers: look at it again next time instead of for good
+        if (verdict === 'reject') { if (!x.provisional) S.rejected.push(x.start); continue; }
         const rep = { ...x, n: S.liveReps.length + 1 };
         S.liveReps.push(rep); lastTop = x.top; S.lastRepEnd = x.top;
         this.on.rep(rep, S);
@@ -884,9 +987,12 @@ export class Session {
       const periods = []; for (let k = 1; k < S.liveReps.length; k++) periods.push((S.liveReps[k].top - S.liveReps[k - 1].top) / fs);
       // End of set: bar put down (2.5 s truly still) or no rep for much longer than the rep rhythm.
       // A breath at the top between reps must not end the set.
-      const endGap = Math.max(6, 2.5 * (median(periods) || 2.5));
+      const endGap = Math.max(6, 2.5 * (median(periods.slice(-3)) || 2.5));
       const stillLong = stillNow && this.stillRun >= 2.5 * fs && now - S.lastRepEnd > 1.0 * fs;
-      if (stillLong || (now - S.lastRepEnd) / fs > endGap) this._finishSet(now, Math.min(now, S.lastRepEnd + Math.round(0.5 * fs)));
+      // Overdue: wait (up to 4 s more) for a still moment first, so a slow last rep that went straight into
+      // racking the bar can still be measured (the still moment is what removes the drift).
+      const quiet = (now - S.lastRepEnd) / fs;
+      if (stillLong || (quiet > endGap && (this._settledSince(S.lastRepEnd) || quiet > endGap + 4))) this._finishSet(now, Math.min(now, S.lastRepEnd + Math.round(0.5 * fs)));
       return;
     }
     // idle: look for the start of a set in the recent motion
@@ -896,9 +1002,9 @@ export class Session {
       return;
     }
     if (!this.pre.calibrated) return;
-    const from = Math.max(this.lastSetEnd, this.F.base, now - 25 * fs, this.lastStillEnd - Math.round(0.5 * fs), this.pre.calibratedAt);
+    const from = Math.max(this.lastSetEnd, this.F.base, now - 25 * fs, this.lastStillEnd - Math.round(0.5 * fs), this.pre.calibratedAt, this.goAt ?? -Infinity);
     if (now - from < 2 * fs) return;
-    const r = analyzeWindow(this.F, from, now, { fs, concentric: this.profile.concentric, final: false, loadKg: this.loadKg });
+    const r = analyzeWindow(this.F, from, now, this._wopts({ final: false }));
     const reps = this._rhythmGroup(r.reps);
     // Three steady reps start a set live (earlier reps are counted retroactively). Sets of one or two
     // heavy reps are picked up when the bar is put down again (see _tryShort).
@@ -906,10 +1012,10 @@ export class Session {
     // like real lifting: big enough, and for bar work without much rotation.
     // Wrist-style exercises (curls, raises, pull-downs) are too noisy for this: they still need three reps
     // until there is real data to tune them on.
-    const wristy = this.profile.kind === 'isolation' || this.profile.kind === 'pull-down';
+    const wristy = ['isolation', 'pull-down', 'fly', 'row'].includes(this.profile.kind);
     if (reps.length < (this.armed && !wristy ? 1 : 3) || r.M < 0.08) return;
     if (reps.length < 3) {
-      if (!(this.stillBefore >= 2 * fs)) return;
+      if (!(this.stillBefore >= 2 * fs) && this.goAt === null) return;
       if (reps.some(x => x.rom < 0.2 || x.rotDeg > 45)) return;
     }
     const last = reps[reps.length - 1];
@@ -921,14 +1027,14 @@ export class Session {
     const gaps = []; for (let k = 1; k < reps.length; k++) gaps.push((reps[k].top - reps[k - 1].top) / fs);
     // (a lone rep has no gaps: judge it by how long its lift took instead)
     if (gaps.length ? median(gaps) < 0.9 : reps[0].conDur < 0.35) return;
-    this._startSet(from, reps);
+    this._startSet(from, reps, r.axis);
   }
 
-  _startSet(from, reps) {
+  _startSet(from, reps, axis = null) {
     const fs = this.fs;
     this.active = {
       id: Date.now(), exercise: this.exercise, loadKg: this.loadKg, rejected: [],
-      winStart: from, firstStart: reps[0].start, liveReps: [], lastRepEnd: reps[reps.length - 1].top, startedAt: Date.now() - (this.now - reps[0].start) / fs * 1000,
+      winStart: from, axis, firstStart: reps[0].start, liveReps: [], lastRepEnd: reps[reps.length - 1].top, startedAt: Date.now() - (this.now - reps[0].start) / fs * 1000,
     };
     this.on.setStart(this.active);
     for (const r of reps) { const rep = { ...r, n: this.active.liveReps.length + 1 }; this.active.liveReps.push(rep); this.on.rep(rep, this.active); }
@@ -936,33 +1042,58 @@ export class Session {
 
   _tryShort(now) {
     const fs = this.fs;
-    const from = Math.max(this.lastSetEnd, this.F.base, now - 40 * fs, this.pre.calibratedAt);
+    const from = Math.max(this.lastSetEnd, this.F.base, now - 40 * fs, this.pre.calibratedAt, this.goAt ?? -Infinity);
     if (now - from < 1.5 * fs) return;
-    const r = analyzeWindow(this.F, from, now, { fs, concentric: this.profile.concentric, final: true, loadKg: this.loadKg });
+    const r = analyzeWindow(this.F, from, now, this._wopts({ final: true }));
     // The weight was put down after a burst of movement. A short set may have ended before the live
     // detector (which waits for three reps) committed. Steady groups of 3+ count; one or two reps count
     // only if big and with little rotation (bar work: lifting the hand to look at a phone is one big
     // move too, but it turns the wrist a lot).
-    if (!this.longStillBefore) return;
+    if (!this.longStillBefore && this.goAt === null) return;
     const reps = this._rhythmGroup(r.reps);
     if (!reps.length) return;
     if (reps.length >= 3) {
       const m = median(reps.map(x => x.rom));
       if (m < 0.12 || Math.sqrt(mean(reps.map(x => (x.rom - m) ** 2))) / m > 0.35) return;
     } else if (reps.some(x => x.rom < 0.2 || x.rotDeg > 45)) return;
-    this._startSet(from, reps);
+    this._startSet(from, reps, r.axis);
     this._finishSet(now);
+  }
+
+  // Has the board been still for a moment (long enough to anchor the drift) since absolute index from?
+  _settledSince(from) {
+    const need = Math.round(1.2 * this.fs), a = Math.max(from, this.F.base) - this.F.base, b = this.F.end - this.F.base;
+    let run = 0;
+    for (let i = a; i < b; i++) { run = this.F.still[i] ? run + 1 : 0; if (run >= need) return true; }
+    return false;
   }
 
   // cut: absolute index where the set is over (just after its last rep)
   _finishSet(now, cut = now) {
-    const S = this.active; this.active = null;
+    const S = this.active;
     const fs = this.fs;
+    // Late look: once the bar has been still again, the whole set can be measured properly. A slow last rep
+    // that ran straight into racking the bar only shows up now (2026-11-16: bench 96 kg, 4th rep).
+    let r2 = null;
+    if (S.liveReps.length >= 2 && this._settledSince(S.lastRepEnd)) {
+      r2 = analyzeWindow(this.F, S.winStart, now, this._wopts({ final: true, loadKg: S.loadKg, axisVec: S.axis }));
+      let lastTop = S.lastRepEnd;
+      for (const x of r2.reps) {
+        if (x.start <= lastTop) continue;
+        if (this._judge(S.liveReps, x) !== 'ok') break;
+        const rep = { ...x, n: S.liveReps.length + 1 };
+        S.liveReps.push(rep); lastTop = x.top; S.lastRepEnd = x.top;
+        this.on.rep(rep, S);
+      }
+    }
+    this.active = null;
     const end = Math.max(cut, Math.min(now, S.lastRepEnd + fs));
-    const r = analyzeWindow(this.F, S.winStart, end, { fs, concentric: this.profile.concentric, final: true, loadKg: S.loadKg });
+    const r = analyzeWindow(this.F, S.winStart, end, this._wopts({ final: true, loadKg: S.loadKg, axisVec: S.axis }));
     // Final metrics come from the whole set at once; keep exactly the reps that were counted live
     // (the athlete already heard that count), each matched to its refined version.
-    let reps = S.liveReps.map(x => nearestStart(r.reps, x.start, 0.35 * fs) || x);
+    // (after a late look, the last rep is measured on the whole window: it reaches the still moment that
+    // anchors it; the others keep the tighter window, which measures them better)
+    let reps = S.liveReps.map((x, k) => nearestStart((r2 && k === S.liveReps.length - 1 ? r2 : r).reps, x.start, 0.35 * fs) || x);
     // A rep is first judged on provisional numbers; with the final numbers a trailing rep can turn out to be
     // the bar being racked. Drop it.
     while (reps.length > 3 && this._isRack(reps[reps.length - 1], reps.slice(0, -1))) reps.pop();
@@ -970,7 +1101,7 @@ export class Session {
     reps = reps.map((x, k) => ({ ...x, n: k + 1, provisional: false }));
     // Bar tilt, for bar lifts only (a dumbbell, cable or machine has no bar to tilt).
     const kind = profileFor(S.exercise).kind;
-    if (!['isolation', 'pull-down', 'pull-up'].includes(kind) && !/dumbbell|\bdb\b|kettlebell|cable|machine|smith/i.test(S.exercise)) {
+    if (!['isolation', 'pull-down', 'pull-up', 'fly'].includes(kind) && !/dumbbell|\bdb\b|kettlebell|cable|machine|smith|lever/i.test(S.exercise)) {
       const tilt = barTilt(this.F, S.winStart, end, reps, { fs });
       if (tilt) reps = reps.map((x, k) => (tilt.reps[k] ? { ...x, tilt: tilt.reps[k].lead, tiltTop: tilt.reps[k].shift } : x));
     }
