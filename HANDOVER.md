@@ -1,5 +1,9 @@
 # RepTracker handover (2026-11-06, form + all-day mode added 2026-11-13, first real VitaBrief workout 2026-11-13, counting fixes from the 2026-11-16 workout)
 
+## Third real workout (2026-11-17, VitaBrief 10.59)
+
+18 new sets (`G:\My Drive\reptracker_vitabrief_20261117-0841.json`, 40 sets in all; the user confirmed the logged reps are right): lateral raise, cable rear delt row, dumbbell incline curl, one-arm cable curl, cable pushdown. The replay matched the phone. Wrong: incline curls 10/7/5 for 8/5/4, lateral raise 17 for 16, rear delt row 13 for 12. The curls and the raise all had extra moves after the last real rep: lowering the dumbbells (23-30 cm in 0.7-1.0 s after reps of 42 cm that had slowed to 1.6-3.1 s) or a half rep (16 cm after 35 cm). Fix (VitaBrief 10.60): `_edgeTrim` drops a last rep under half the set's range, or under 3/4 of it and taking under 0.65x the time of the three reps before it. Result: 35 of 40 exact, none off by more than one; the 2026-11-12 CSV stays at 17 of 21 with none worse (a real 31 cm last press after 58 cm reps is kept because it was not quick); simulator curls 26 -> 33% exact. Still off by one: rear delt row set 3 (the extra "rep" looks like every other rep), bench set 7's grinder, three row sets.
+
 ## Second real workout (2026-11-16, VitaBrief 10.58, board on the wrist, every set started by taps)
 
 22 recorded sets (`G:\My Drive\reptracker_vitabrief_20261116-2118.json`): bench up to 96 kg and a single at 80, dumbbell incline press, lever seated fly, lever seated row, wide neutral-grip pulldown. Replaying them gave the same counts as the phone, so nothing was lost over Bluetooth; only 9 of 22 were right. Causes and fixes (engine, copied into VitaBrief 10.59):

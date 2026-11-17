@@ -924,6 +924,16 @@ export class Session {
   // rep after a breather is still a rep, and so is a short one in rhythm.
   _edgeTrim(reps) {
     const fs = this.fs;
+    // After the last real rep: lowering the dumbbells or a half rep. Real reps slow down towards the end of a
+    // set; these are much shorter AND suddenly quick (2026-11-17 incline curls: 23-30 cm in 0.7-1.0 s after
+    // reps of 42 cm taking 1.6-3.1 s), or under half the range (a 16 cm lateral raise after 35 cm reps).
+    // A short last rep at an ordinary speed stays (a real 31 cm press after 58 cm reps, 2026-11-12).
+    for (let guard = 0; guard < 4 && reps.length >= 5; guard++) {
+      const x = reps[reps.length - 1], before = reps.slice(0, -1);
+      const mr = median(before.map(r => r.rom)), cRef = median(before.slice(-3).map(r => r.conDur));
+      if (x.rom < 0.5 * mr || (x.rom < 0.75 * mr && x.conDur < 0.65 * cRef)) { reps = before; continue; }
+      break;
+    }
     // Turning the wrist far more than the reps do (picking dumbbells up, putting them down) is never a rep,
     // in rhythm or not.
     for (let guard = 0; guard < 4 && reps.length >= 4; guard++) {
