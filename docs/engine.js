@@ -111,6 +111,11 @@ function solve(A, b) {
 }
 
 // ---------------------------------------------------------------- per-sample preprocessing
+// A hard landing (a deadlift touching the floor, a dropped dumbbell) shakes the board far beyond
+// normal lifting: over 2.5 g, or a turn faster than the gyro can measure (it reads at most 1000 deg/s
+// per axis). Real deadlifts of 2026-11-18 hit 4-7 g and 1150 deg/s at every rep.
+const HIT_G = 1.5, HIT_GYRO = 990;
+
 export class Preprocessor {
   // seed: { gyroBias: [3] deg/s, g0 } learned earlier on the same board (see Session.learned).
   // The gyro's offset belongs to the board, not to the set, so a new session can start with it
@@ -130,6 +135,7 @@ export class Preprocessor {
     this.k = 0; this.filled = 0;
     this._v = [0, 0, 0];
     this.count = 0;
+    this.hitLeft = 0;             // samples left in which gravity is trusted more after a hard landing
     this.calibratedAt = -1;        // sample count when the gyro bias was first known
     if (calib && calib.gyroBias) { this.bias = calib.gyroBias.slice(); this.calibrated = true; this.calibratedAt = 0; }
     this.seeded = false;           // running on a remembered offset, not yet confirmed by a still second
@@ -249,11 +255,18 @@ export class Preprocessor {
     const gx = (gxd - this.bias[0]) * D2R, gy = (gyd - this.bias[1]) * D2R, gz = (gzd - this.bias[2]) * D2R;
     // Trust the accelerometer for tilt only when it reads close to 1 g (not accelerating).
     const dev = (am - this.g0) / 0.08;
-    const beta = still ? 0.15 : 0.04 * Math.exp(-dev * dev);
+    let beta = still ? 0.15 : 0.04 * Math.exp(-dev * dev);
+    // After a hard landing the gyro has missed part of the turn (it was off its scale), so "up" is
+    // wrong. For a second after it, gravity puts it right much faster whenever the reading is calm.
+    const hit = am > this.g0 + HIT_G || Math.abs(gxd) >= HIT_GYRO || Math.abs(gyd) >= HIT_GYRO || Math.abs(gzd) >= HIT_GYRO;
+    // (only a turn off the scale leaves "up" wrong; a jolt alone does not)
+    if (hit && (Math.abs(gxd) >= HIT_GYRO || Math.abs(gyd) >= HIT_GYRO || Math.abs(gzd) >= HIT_GYRO)) this.hitLeft = this.fs;
+    else if (this.hitLeft > 0) { this.hitLeft--; if (Math.abs(am - this.g0) < 0.15) beta = Math.max(beta, 0.5); }
     this._madgwick(ax, ay, az, gx, gy, gz, beta);
     const w = qRotate(this.q, ax, ay, az, this._v);
     out.lx = w[0] * G; out.ly = w[1] * G; out.lz = (w[2] - this.g0) * G;
     out.still = still;
+    out.hit = hit;
     out.wx = gx; out.wy = gy; out.wz = gz;
     // gravity direction in the sensor frame: q* (0,0,1) q
     const [q0, q1, q2, q3] = this.q;
@@ -269,6 +282,7 @@ export class Frames {
     this.cap = cap; this.n = 0; this.base = 0;   // absolute index of element 0
     for (const f of FIELDS) this[f] = new Float32Array(cap);
     this.still = new Uint8Array(cap);
+    this.hit = new Uint8Array(cap);
   }
   get end() { return this.base + this.n; }
   push(fr) {
@@ -276,16 +290,17 @@ export class Frames {
     const i = this.n++;
     for (const f of FIELDS) this[f][i] = fr[f];
     this.still[i] = fr.still ? 1 : 0;
+    this.hit[i] = fr.hit ? 1 : 0;
   }
   _grow() {
     this.cap *= 2;
-    for (const f of [...FIELDS, 'still']) { const a = new this[f].constructor(this.cap); a.set(this[f]); this[f] = a; }
+    for (const f of [...FIELDS, 'still', 'hit']) { const a = new this[f].constructor(this.cap); a.set(this[f]); this[f] = a; }
   }
   // drop everything before absolute index abs
   trim(abs) {
     const k = Math.min(this.n, Math.max(0, abs - this.base));
     if (k <= 0) return;
-    for (const f of [...FIELDS, 'still']) this[f].copyWithin(0, k, this.n);
+    for (const f of [...FIELDS, 'still', 'hit']) this[f].copyWithin(0, k, this.n);
     this.n -= k; this.base += k;
   }
 }
@@ -404,6 +419,26 @@ export function analyzeWindow(F, a, b, opts) {
     i = j;
   }
   const stillIdx = []; for (let i = 0; i < n; i++) if (still[i]) stillIdx.push(i);
+  // Hard landings (deadlifts touching the floor between reps). Right after one the weight is on the
+  // floor, so its velocity is zero there too. The landing's own reading is no use: the board rings and
+  // the gyro is off its scale, so the jolt is many times the bar's real stop and would throw the whole
+  // lowering off. It is left out: the bar comes down at the speed measured since the last moment it was
+  // known to stand still, and stops evenly over the landing.
+  // (Only for lifts from the floor: racking a bench bar or dropping dumbbells after a set is no stop mid-set.)
+  const hitRaw = F.hit ? F.hit.subarray(o0, o0 + n) : null, hitIdx = [], hitRuns = [];
+  if (opts.floorHits && hitRaw && opts.axis !== 'turn') {
+    const mg = Math.round(0.02 * fs);
+    for (let i = 0; i < n;) {
+      if (!hitRaw[i]) { i++; continue; }
+      let j = i; while (j < n && hitRaw[j]) j++;
+      const s0 = Math.max(0, i - mg), e0 = Math.min(n, j + mg);
+      if (hitRuns.length && s0 <= hitRuns[hitRuns.length - 1][1]) hitRuns[hitRuns.length - 1][1] = e0;   // one landing, ringing
+      else hitRuns.push([s0, e0]);
+      i = j;
+    }
+    for (const r of hitRuns) if (r[1] < n) hitIdx.push(r[1]);
+  }
+  const zeroIdx = hitIdx.length ? [...new Set([...stillIdx, ...hitIdx])].sort((x, y) => x - y) : stillIdx;
   let axis = null;
   if (opts.axis === 'auto') {
     axis = opts.axisVec || mainAxis(lx, ly, lz, stillIdx, fs);
@@ -416,10 +451,23 @@ export function analyzeWindow(F, a, b, opts) {
     if (axis) { vzRaw = new Float64Array(n); for (let i = 0; i < n; i++) vzRaw[i] = (wx[i] * axis[0] + wy[i] * axis[1] + wz[i] * axis[2]) * TURN_RADIUS; }
   }
   const vxRaw = cumsum(lx, dt), vyRaw = cumsum(ly, dt);
+  const lz0 = lz;
+  const landed = anchors => {
+    const l = Float64Array.from(lz0);
+    let k = 0, prev = -1;
+    for (const [s0, e0] of hitRuns) {
+      while (k < anchors.length && anchors[k] < s0) prev = anchors[k++];
+      let vb = 0; for (let i = prev + 1; i < s0; i++) vb += l[i] * dt;
+      const d = -vb / ((e0 - s0) * dt);
+      for (let i = s0; i < e0; i++) l[i] = d;
+    }
+    return l;
+  };
+  if (hitRuns.length) { lz = landed(zeroIdx); vzRaw = cumsum(lz, dt); }
 
   // pass 1: drift removed at long still periods. Without any (continuous wrist motion),
   // fall back to a slow high-pass just to locate the turnarounds roughly.
-  let v = detrend(vzRaw, stillIdx);
+  let v = detrend(vzRaw, zeroIdx);
   const stillCover = stillIdx.length ? (stillIdx[stillIdx.length - 1] - stillIdx[0]) / n : 0;
   if (stillCover < 0.5) {
     const hp = movingAvg(v, Math.round(4 * fs));
@@ -431,7 +479,8 @@ export function analyzeWindow(F, a, b, opts) {
   // passes 2-4: velocity is exactly zero at every turnaround -> use them as anchors and refine
   let thr = 0.05, M = 0;
   for (let pass = 0; pass < 3; pass++) {
-    const anchors = [...new Set([...stillIdx, ...ext.map(e => e.i)])].sort((x, y) => x - y);
+    const anchors = [...new Set([...zeroIdx, ...ext.map(e => e.i)])].sort((x, y) => x - y);
+    if (hitRuns.length) { lz = landed(anchors); vzRaw = cumsum(lz, dt); }
     v = detrend(vzRaw, anchors);
     p = cumsum(v, dt);
     const r1 = extrema(p, 0.04);
@@ -485,7 +534,7 @@ export function analyzeWindow(F, a, b, opts) {
   }
 
   // horizontal velocity with the same anchors (for bar path)
-  const anchorsF = [...new Set([...stillIdx, ...ext.map(e => e.i)])].sort((x, y) => x - y);
+  const anchorsF = [...new Set([...zeroIdx, ...ext.map(e => e.i)])].sort((x, y) => x - y);
   const vx = detrend(vxRaw, anchorsF), vy = detrend(vyRaw, anchorsF);
   const px = cumsum(vx, dt), py = cumsum(vy, dt);
 
@@ -504,7 +553,7 @@ export function analyzeWindow(F, a, b, opts) {
       if (down < 0.25 * amp) continue;
     }
     let rot = 0;
-    for (let i = e0.i; i <= e1.i; i++) { const j = o0 + i; rot += Math.hypot(F.wx[j], F.wy[j], F.wz[j]) * dt; }
+    for (let i = e0.i; i <= e1.i; i++) { const j = o0 + i; if (!opts.floorHits || !hitRaw[i]) rot += Math.hypot(F.wx[j], F.wy[j], F.wz[j]) * dt; }   // (not the landing's shake)
     cand.push({ k, i0: e0.i, i1: e1.i, amp, rot: rot / D2R, provisional: !!e1.provisional });
   }
   if (!cand.length) return { reps: [], M, v, p, axis };
@@ -850,7 +899,8 @@ export class Session {
   get now() { return this.F.end; }
   _wopts(extra) {
     const pr = this.profile;
-    return { fs: this.fs, concentric: pr.concentric, axis: pr.axis, eccFirst: pr.eccFirst, loadKg: this.loadKg, ...extra };
+    // floorHits: the weight goes back to the floor between reps (deadlifts), so a hard landing marks a stop
+    return { fs: this.fs, concentric: pr.concentric, axis: pr.axis, eccFirst: pr.eccFirst, floorHits: pr.kind === 'deadlift', loadKg: this.loadKg, ...extra };
   }
 
   // raw: [ax, ay, az, gx, gy, gz]; idx: sample index from the board (gaps get filled)
@@ -930,6 +980,23 @@ export class Session {
   // rep after a breather is still a rep, and so is a short one in rhythm.
   _edgeTrim(reps) {
     const fs = this.fs;
+    // Deadlifts: every rep ends with the bar landing on the floor. Standing up after letting go of the bar
+    // lifts the hands like a rep, but nothing lands after it, and without the weight it is quicker
+    // (2026-11-18: 49 cm at 0.60 m/s in 0.8 s, after reps of 0.37-0.44 m/s taking 1.4 s). A last rep that
+    // was put down with a landing is always kept.
+    if (this.profile.kind === 'deadlift' && this.F.hit) {
+      const F = this.F, landed = (from, to) => {
+        for (let i = Math.max(from, F.base); i < Math.min(to, F.end); i++) if (F.hit[i - F.base]) return true;
+        return false;
+      };
+      for (let guard = 0; guard < 2 && reps.length >= 3; guard++) {
+        const x = reps[reps.length - 1], before = reps.slice(0, -1);
+        if (!landed(before[before.length - 1].top, x.start) || landed(x.top, F.end)) break;
+        const mv = median(before.map(r => r.mcv)), mc = median(before.map(r => r.conDur));
+        if (x.mcv > 1.3 * mv || x.conDur < 0.7 * mc) { reps = before; continue; }
+        break;
+      }
+    }
     // After the last real rep: lowering the dumbbells or a half rep. Real reps slow down towards the end of a
     // set; these are much shorter AND suddenly quick (2026-11-17 incline curls: 23-30 cm in 0.7-1.0 s after
     // reps of 42 cm taking 1.6-3.1 s), or under half the range (a 16 cm lateral raise after 35 cm reps).
