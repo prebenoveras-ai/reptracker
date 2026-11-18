@@ -27,6 +27,7 @@ const D2R = Math.PI / 180;
 //      first move away from where the set starts (the stretched position).
 // eccFirst: the lift starts at the top and goes down first (bench, squat). A move up that has no
 //      lowering before it (lifting the bar off the hooks) is not a rep.
+// noBar: no bar to tilt, even though the name does not say dumbbell or machine (Lying Hammer Press).
 const PROFILES = [
   { re: /face.?pull/i, concentric: 'up', mvt: null, name: 'row', axis: 'auto' },
   { re: /pull.?down|push.?down|triceps?.*(cable|rope)|straight.?arm/i, concentric: 'down', mvt: null, name: 'pull-down' },
@@ -34,6 +35,11 @@ const PROFILES = [
   { re: /dead|rdl|romanian|stiff|good.?morning|rack pull/i, concentric: 'up', mvt: 0.17, name: 'deadlift' },
   { re: /hip thrust|glute bridge/i, concentric: 'up', mvt: 0.25, name: 'hip thrust' },
   { re: /fly|flye|pec.?deck|rear.?delt|reverse.?fly/i, concentric: 'up', mvt: null, name: 'fly', axis: 'turn' },
+  // Seated and standing chest presses push forwards (an incline one forwards and up), so they are counted
+  // on the main direction the hands move, like rows; the set starts with the push from the chest.
+  { re: /chest.?press/i, concentric: 'up', mvt: null, name: 'chest press', axis: 'auto' },
+  // Lying Hammer Press: a dumbbell bench press with a neutral grip (kicked up, pressed from the bottom).
+  { re: /hammer.?press/i, concentric: 'up', mvt: 0.17, name: 'bench', noBar: true },
   { re: /bench|floor press|dip|push.?up/i, concentric: 'up', mvt: 0.17, name: 'bench', eccFirst: true },
   { re: /squat|lunge|split|leg press|hack|step.?up/i, concentric: 'up', mvt: 0.30, name: 'squat', eccFirst: true },
   { re: /overhead|ohp|military|shoulder press|push press|arnold/i, concentric: 'up', mvt: 0.19, name: 'overhead press' },
@@ -43,8 +49,8 @@ const PROFILES = [
 export function profileFor(exercise) {
   const ex = String(exercise || '');
   // (a dumbbell press is kicked up to the bottom position and pressed from there: no lowering first)
-  for (const p of PROFILES) if (p.re.test(ex)) return { concentric: p.concentric, mvt: p.mvt, kind: p.name, axis: p.axis || 'z', eccFirst: !!p.eccFirst && !(p.name === 'bench' && /dumbbell|\bdb\b|kettlebell/i.test(ex)) };
-  return { concentric: 'up', mvt: null, kind: 'generic', axis: 'z', eccFirst: false };
+  for (const p of PROFILES) if (p.re.test(ex)) return { concentric: p.concentric, mvt: p.mvt, kind: p.name, axis: p.axis || 'z', eccFirst: !!p.eccFirst && !(p.name === 'bench' && /dumbbell|\bdb\b|kettlebell/i.test(ex)), noBar: !!p.noBar };
+  return { concentric: 'up', mvt: null, kind: 'generic', axis: 'z', eccFirst: false, noBar: false };
 }
 
 // Velocity zones commonly used in velocity-based training (mean concentric velocity, m/s).
@@ -1022,7 +1028,7 @@ export class Session {
     // like real lifting: big enough, and for bar work without much rotation.
     // Wrist-style exercises (curls, raises, pull-downs) are too noisy for this: they still need three reps
     // until there is real data to tune them on.
-    const wristy = ['isolation', 'pull-down', 'fly', 'row'].includes(this.profile.kind);
+    const wristy = ['isolation', 'pull-down', 'fly', 'row', 'chest press'].includes(this.profile.kind);
     if (reps.length < (this.armed && !wristy ? 1 : 3) || r.M < 0.08) return;
     if (reps.length < 3) {
       if (!(this.stillBefore >= 2 * fs) && this.goAt === null) return;
@@ -1110,8 +1116,8 @@ export class Session {
     reps = this._edgeTrim(reps);
     reps = reps.map((x, k) => ({ ...x, n: k + 1, provisional: false }));
     // Bar tilt, for bar lifts only (a dumbbell, cable or machine has no bar to tilt).
-    const kind = profileFor(S.exercise).kind;
-    if (!['isolation', 'pull-down', 'pull-up', 'fly'].includes(kind) && !/dumbbell|\bdb\b|kettlebell|cable|machine|smith|lever/i.test(S.exercise)) {
+    const prof = profileFor(S.exercise), kind = prof.kind;
+    if (!['isolation', 'pull-down', 'pull-up', 'fly', 'chest press'].includes(kind) && !prof.noBar && !/dumbbell|\bdb\b|kettlebell|cable|machine|smith|lever/i.test(S.exercise)) {
       const tilt = barTilt(this.F, S.winStart, end, reps, { fs });
       if (tilt) reps = reps.map((x, k) => (tilt.reps[k] ? { ...x, tilt: tilt.reps[k].lead, tiltTop: tilt.reps[k].shift } : x));
     }

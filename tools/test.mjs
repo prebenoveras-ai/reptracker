@@ -1,5 +1,5 @@
 // Quick regression checks for the engine. Run: npm test
-import { Preprocessor, fitCalibration, analyzeRecording, estimateRir, loadVelocityProfile, summarizeSet, stickingPoint } from '../docs/engine.js';
+import { Preprocessor, fitCalibration, analyzeRecording, estimateRir, loadVelocityProfile, summarizeSet, stickingPoint, profileFor } from '../docs/engine.js';
 import { makeSession, rng, randomQuat, FS } from './sim.mjs';
 import { DayLogger, decodeAct, decodeAngle } from './day.mjs';
 
@@ -19,6 +19,15 @@ const ok = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!
     ok(Math.abs(p.bias[0] - 2) < 0.01 && Math.abs(p.g0 - 1.04) < 0.001, `pose ${t}: gyro bias and gravity scale learned`);
   }
   ok(worst < 0.05, `still board shows < 0.05 m/s2 motion (worst ${worst.toFixed(3)})`);
+}
+
+// 1b. chest and hammer presses have a movement profile (they were 'generic', so the app would not record them)
+{
+  const cp = ['Lever Incline Hammer Chest Press', 'Machine Chest Press', 'Cable Seated Chest Press'].map(profileFor);
+  ok(cp.every(p => p.kind === 'chest press' && p.axis === 'auto' && !p.eccFirst), 'chest presses: counted on the main hand direction, set starts with the push');
+  const hp = profileFor('Lying Hammer Press');
+  ok(hp.kind === 'bench' && !hp.eccFirst && hp.noBar, 'Lying Hammer Press: a dumbbell bench press (no lowering first, no bar tilt)');
+  ok(profileFor('Lever Seated Shoulder Press').kind === 'overhead press' && profileFor('Bench Press').eccFirst, 'shoulder press and barbell bench unchanged');
 }
 
 // 2. six-side calibration recovers per-axis gain and offset
